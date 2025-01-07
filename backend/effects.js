@@ -2,20 +2,19 @@ const {sendPacket} = require("./art-net");
 const {getRandomSovietColor, hsvToRgb} = require("./utils");
 
 
-const totalLights = 170;
 
-const sendRainbow = async (universe, ip, offset) => {
+const sendRainbow = async (universe, ip, length, offset) => {
     const array = [];
-    for (let i = 0; i < totalLights; i++) {
+    for (let i = 0; i < length; i++) {
         const hue = ((i + offset) % 170) / 170 * 360;
         const color = hsvToRgb(hue, 1, 0.7);
         array.push(...color);
     }
     await sendPacket(array, universe, ip);
 }
-const sendGarland  = async (universe, ip, offset) => {
+const sendGarland  = async (universe, ip, length, offset) => {
     const array = [];
-    for (let i = 0; i < totalLights; i++) {
+    for (let i = 0; i < length; i++) {
         const hue = (((i + offset) % 50) / 50) * 360;
         const isOn = ((i + offset) % 10) < 5;
         const color = isOn ? hsvToRgb(hue, 1, 1) : [0, 0, 0];
@@ -25,13 +24,13 @@ const sendGarland  = async (universe, ip, offset) => {
 }
 
 
-const sendComet = async (universe, ip, offset) => {
+const sendComet = async (universe, ip, length, offset) => {
     const array = [];
     const cometLength = 8;
-    const cometPosition = offset % totalLights;
+    const cometPosition = offset % length;
     const cometColor = [0, 0, 255];
 
-    for (let i = 0; i < totalLights; i++) {
+    for (let i = 0; i < length; i++) {
         let color = [0, 0, 0];
         if (i >= cometPosition && i < cometPosition + cometLength) {
             const brightness = 1 - (i - cometPosition) / cometLength;
@@ -42,13 +41,12 @@ const sendComet = async (universe, ip, offset) => {
     await sendPacket(array, universe, ip);
 }
 
-const sendSovietGarland = async (universe, ip) => {
+const sendSovietGarland = async (universe, ip, length) => {
     const array = [];
-    const totalLights = 170;
 
     const blinkChance = 0.2;
 
-    for (let i = 0; i < totalLights; i++) {
+                for  (let i = 0; i < length; i++) {
         const isOn = Math.random() > blinkChance;
         const color = isOn ? getRandomSovietColor() : [0, 0, 0];
         array.push(...color);
@@ -57,7 +55,7 @@ const sendSovietGarland = async (universe, ip) => {
 
 };
 
-const sendSmoothFadeEffect = async (universe, ip, offset, hueColor) => {
+const sendSmoothFadeEffect = async (universe, ip, length, offset, hueColor) => {
     const array = [];
     const fadeDuration = 170;
     const halfDuration = fadeDuration / 2;
@@ -76,7 +74,7 @@ const sendSmoothFadeEffect = async (universe, ip, offset, hueColor) => {
         currentIntensityB = Math.max(0, Math.round(rgbColor[2] * (1 - (offset % fadeDuration - halfDuration) / halfDuration)));
     }
 
-    for (let i = 0; i < totalLights; i++) {
+    for (let i = 0; i < length; i++) {
         const color = [currentIntensityG, currentIntensityR, currentIntensityB];
         array.push(...color);
     }
@@ -84,16 +82,16 @@ const sendSmoothFadeEffect = async (universe, ip, offset, hueColor) => {
     await sendPacket(array, universe, ip);
 };
 
-const sendFillColor = async (universe, ip, offset, hueColor) => {
+const sendFillColor = async (universe, ip, length, offset, hueColor) => {
     const array = []
     const color = hsvToRgb(hueColor, 1, 1);
-    for (let i = 0; i < totalLights; i++) {
+    for (let i = 0; i < length; i++) {
         array.push(...color);
     }
     await sendPacket(array, universe, ip)
 }
 
-const sendAggressiveTechnoEffect = async (universe, ip, offset) => {
+const sendAggressiveTechnoEffect = async (universe, ip, length, offset) => {
     const array = [];
     const fadeDuration = 170; // Продолжительность одного цикла пульсации
     const halfDuration = fadeDuration / 2;
@@ -129,7 +127,7 @@ const sendAggressiveTechnoEffect = async (universe, ip, offset) => {
     }
 
     // Заполняем массив с цветами для всех светодиодов
-    for (let i = 0; i < totalLights; i++) {
+    for (let i = 0; i < length; i++) {
         const color = [currentIntensityR, currentIntensityG, currentIntensityB];
         array.push(...color);
     }
@@ -138,15 +136,14 @@ const sendAggressiveTechnoEffect = async (universe, ip, offset) => {
     await sendPacket(array, universe, ip);
 };
 
-const sendStroboTechnoEffect = async (universe, ip, offset) => {
+const sendStroboTechnoEffect = async (universe, ip, length) => {
     const array = [];
-    const totalLights = 170;
     const numStrobes = 70;
 
-    let ledStates = new Array(totalLights).fill([0, 0, 0]);
+    let ledStates = new Array(length).fill([0, 0, 0]);
 
     for (let i = 0; i < numStrobes; i++) {
-        const ledIndex = Math.floor(Math.random() * totalLights);
+        const ledIndex = Math.floor(Math.random() * length);
         const randomFlash = Math.random();
 
         if (randomFlash > 0.5) {
@@ -159,7 +156,7 @@ const sendStroboTechnoEffect = async (universe, ip, offset) => {
         }
     }
 
-    for (let i = 0; i < totalLights; i++) {
+    for (let i = 0; i < length; i++) {
         const ledColor = ledStates[i];
 
         array.push(...ledColor);
@@ -171,8 +168,8 @@ const sendStroboTechnoEffect = async (universe, ip, offset) => {
 
 
 
-const sendOff = async (universe, ip) => {
-    const array = new Array(totalLights * 3).fill(0);
+const sendOff = async (universe, ip, length) => {
+    const array = new Array(length * 3).fill(0);
     await sendPacket(array, universe, ip)
 }
 const effects = {
