@@ -1,58 +1,59 @@
-const {effects} = require("./effects");
-const IP = ['192.168.6.11', '192.168.6.12'];
-let FPS
-let animationFrame
-const totalDiodes = 2220
+const { effects } = require("./effects");
 
-const offsets = []
+const IP_ADDRESSES = ['192.168.6.11', '192.168.6.12'];
+const TOTAL_DIODES = 2220;
 const CHANNELS_PER_PIXEL = 3;
 const MAX_PIXELS_PER_UNIVERSE = Math.floor(512 / CHANNELS_PER_PIXEL);
+const offsets = new Array(calculateTotalUniverses(TOTAL_DIODES)).fill(0);
+let animationFrame = null;
+let framesPerSecond;
 
-const calculateUniverses = (totalDiodes) => {
+const calculateTotalUniverses = (totalDiodes) => {
     return Math.ceil(totalDiodes / MAX_PIXELS_PER_UNIVERSE);
 };
-const totalUniverses = calculateUniverses(totalDiodes, 170);
+
+const totalUniverses = calculateTotalUniverses(TOTAL_DIODES);
 
 const startInterval = async (hueColor, currentEffect) => {
-    clearInterval(animationFrame);
-    for (let universe = 0; universe < totalUniverses; universe++) {
-        if (!offsets[universe]) {
-            offsets[universe] = 0;
-        }
+    if (animationFrame) {
+        clearInterval(animationFrame);
     }
-    if (currentEffect) {
-        switch (currentEffect) {
-            case "garland":
-                FPS = 15;
-                break;
-            case "soviet":
-                FPS = 5;
-                break;
-            default: FPS = 30
-        }
-        const handleEffect = async () => {
-            const promises = []
 
-            for (let ip of IP) {
+    if (currentEffect) {
+        framesPerSecond = determineFPS(currentEffect);
+
+        const handleEffect = async () => {
+            const promises = [];
+
+            for (const ip of IP_ADDRESSES) {
                 for (let universe = 0; universe < totalUniverses; universe++) {
-                    const length = 170
+                    const length = MAX_PIXELS_PER_UNIVERSE;
                     offsets[universe] = (offsets[universe] + 1) % length;
-                    if (offsets[universe] > length - 1) {
-                        offsets[universe] = length - 1
-                    } else if (offsets[universe] < 0) {
-                        offsets[universe] = 0;
-                    }
+
                     promises.push(effects[currentEffect](universe, ip, length, offsets[universe], hueColor));
                 }
             }
-            await Promise.all(promises)
-            animationFrame = setTimeout(handleEffect, 1000 / FPS);
+
+            await Promise.all(promises);
+            animationFrame = setTimeout(handleEffect, 1000 / framesPerSecond);
         };
+
         await handleEffect();
+    }
+};
+
+const determineFPS = (effect) => {
+    switch (effect) {
+        case "garland":
+            return 15;
+        case "soviet":
+            return 5;
+        default:
+            return 30;
     }
 };
 
 module.exports = {
     startInterval,
     animationFrame,
-}
+};

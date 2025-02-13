@@ -61,4 +61,13 @@ const getRandomSovietColor = () => {
     return sovietColors[Math.floor(Math.random() * sovietColors.length)];
 };
 
-module.exports = { hsvToRgb, getRandomSovietColor}
+
+const createColorArray = (length, computeColor) => {
+    const array = [];
+    for (let i = 0; i < length; i++) {
+        array.push(...computeColor(i));
+    }
+    return array;
+};
+
+module.exports = { hsvToRgb, getRandomSovietColor, createColorArray }
