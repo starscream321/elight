@@ -18,10 +18,9 @@ let currentEffect = '';
 app.post('/set-effect', async (req, res) => {
     const { effect, hueColor } = req.body;
     if (effects[effect]) {
-        clearTimeout(animationFrame);
         currentEffect = effect;
         res.send(`Effect changed to: ${effect}`);
-        await startInterval(hueColor);
+        await startInterval(hueColor, currentEffect);
     } else {
         console.log('Effect not found:', effect);
         res.status(400).send('Invalid effect name');
@@ -31,7 +30,7 @@ app.post('/set-effect', async (req, res) => {
 
 app.get('/off-led', async (req, res) => {
         currentEffect = 'off'
-        await startInterval()
+        await startInterval(0,currentEffect);
         setTimeout(() => {
             clearInterval(animationFrame);
         }, 1000)

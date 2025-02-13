@@ -1,6 +1,8 @@
 const dgram = require('dgram');
 const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 
+let currentSequence = 0
+
 function createArtNetPocket(data, universe) {
     let length = data.length;
 
@@ -13,6 +15,8 @@ function createArtNetPocket(data, universe) {
 
     let hLen = (length >> 8) & 0xff;
     let lLen = (length & 0xff);
+
+    let sequence = (currentSequence++) & 0x0F;
 
     let header = [
         'A'.charCodeAt(0),
@@ -27,7 +31,7 @@ function createArtNetPocket(data, universe) {
         80, // 0x50 (OpCode: OpOutput / OpDmx)
         0, // Protocol version high byte
         14, // Protocol version low byte
-        0, // data Sequence
+        currentSequence, // data Sequence
         0,
         lUni,
         hUni,

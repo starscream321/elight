@@ -6,8 +6,8 @@ const {getRandomSovietColor, hsvToRgb} = require("./utils");
 const sendRainbow = async (universe, ip, length, offset) => {
     const array = [];
     for (let i = 0; i < length; i++) {
-        const hue = ((i + offset) % 170) / 170 * 360;
-        const color = hsvToRgb(hue, 1, 0.7);
+        const hue = ((i + offset) % length) / length * 360;
+        const color = hsvToRgb(hue, 1, 0.5);
         array.push(...color);
     }
     await sendPacket(array, universe, ip);
