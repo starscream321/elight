@@ -1,16 +1,15 @@
 const { effects } = require("./effects");
-
 const IP_ADDRESSES = ['192.168.6.11', '192.168.6.12'];
 const TOTAL_DIODES = 2220;
 const CHANNELS_PER_PIXEL = 3;
 const MAX_PIXELS_PER_UNIVERSE = Math.floor(512 / CHANNELS_PER_PIXEL);
+const calculateTotalUniverses = (totalDiodes) => {
+    return Math.ceil(totalDiodes / MAX_PIXELS_PER_UNIVERSE);
+};
 const offsets = new Array(calculateTotalUniverses(TOTAL_DIODES)).fill(0);
 let animationFrame = null;
 let framesPerSecond;
 
-const calculateTotalUniverses = (totalDiodes) => {
-    return Math.ceil(totalDiodes / MAX_PIXELS_PER_UNIVERSE);
-};
 
 const totalUniverses = calculateTotalUniverses(TOTAL_DIODES);
 
