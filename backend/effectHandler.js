@@ -18,8 +18,6 @@ const startInterval = async (hueColor, currentEffect) => {
         clearInterval(animationFrame);
     }
 
-    if (currentEffect) {
-        framesPerSecond = determineFPS(currentEffect);
 
         const handleEffect = async () => {
             const promises = [];
@@ -38,19 +36,8 @@ const startInterval = async (hueColor, currentEffect) => {
         };
 
         await handleEffect();
-    }
 };
 
-const determineFPS = (effect) => {
-    switch (effect) {
-        case "garland":
-            return 15;
-        case "soviet":
-            return 5;
-        default:
-            return 30;
-    }
-};
 
 module.exports = {
     startInterval,
