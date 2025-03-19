@@ -1,5 +1,6 @@
 const { sendPacket } = require("./art-net");
 const { hsvToRgb, createColorArray } = require("./utils");
+const {getAudioSpectrum} = require("./audioProcessor");
 
 const sendRainbow = async (universe, ip, length, offset) => {
     const array = createColorArray(length, i => {
@@ -39,10 +40,25 @@ const sendFillColor = async (universe, ip, length, hueColor) => {
     await sendPacket(array, universe, ip);
 };
 
+const sendSoundPulse = async (universe, ip, length) => {
+    const { bass, mid, treble } = getAudioSpectrum();
+    const bassIntensity = Math.min(1, bass * 10);
+    const midIntensity = Math.min(1, mid * 10);
+    const trebleIntensity = Math.min(1, treble * 10);
+
+    const array = createColorArray(length, i => {
+        const hue = (i / length) * 360;
+        const [r, g, b] = hsvToRgb(hue, 1, Math.max(bassIntensity, midIntensity, trebleIntensity));
+        return [g, r, b]; // GRB порядок
+    });
+    await sendPacket(array, universe, ip);
+};
+
 const effects = {
     rainbow: sendRainbow,
     fade: sendSmoothFadeEffect,
     fillColor: sendFillColor,
+    sound: sendSoundPulse
 };
 
 module.exports = { effects };
