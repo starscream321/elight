@@ -26,7 +26,7 @@
 import AppButton from '@/components/AppButton.vue'
 import axios from 'axios'
 
-const URL = 'http://192.168.6.10:3001'
+const URL = 'http://localhost:3001'
 
 const fadeEffects = [
   {
