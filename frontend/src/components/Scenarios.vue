@@ -7,9 +7,10 @@ import Default_light_icon from "../assets/icons/default-light.svg";
 import Games_icon from "../assets/icons/games.svg";
 import Party_icon from "../assets/icons/party.svg";
 import Romance_icon from "../assets/icons/romance.svg";
+import {ref} from "vue";
 
 
-const buttons = [
+const buttons = ref<any[]>([
   {
     name: "Яркий",
     icon: Lightness_max_icon,
@@ -40,13 +41,23 @@ const buttons = [
     icon: Romance_icon,
     active: false
   }
-]
+])
+
+
+const switchBtn = (name: string) => {
+  buttons.value = buttons.value.map(btn => ({
+    ...btn,
+    active: btn.name === name
+  }));
+}
+
 </script>
 
 <template>
   <div class="buttons-scenarios">
     <MainBtn
         v-for="btn in buttons"
+        @click="switchBtn(btn.name)"
         :key="btn.name"
         :name="btn.name"
         :icon="btn.icon"

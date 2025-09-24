@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body } from '@nestjs/common';
+import {Controller, Get, Post, Body, Put} from '@nestjs/common';
 import { ZoneService } from './zone.service';
 import { Zone } from './zone.entity';
 
@@ -14,5 +14,13 @@ export class ZoneController {
     @Post()
     create(@Body() zone: Partial<Zone>) {
         return this.zoneService.create(zone);
+    }
+
+    @Put()
+    updateZone(@Body() body: {
+        name: string,
+        active: boolean
+    } ) {
+        return this.zoneService.updateZone(body.name, body.active);
     }
 }

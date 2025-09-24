@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import {ArtnetModule} from "./core/artnet/artnet/artnet.module";
 import {EffectsModule} from "./core/effects/effects/effects.module";
 import {YandexModule} from "./core/yandex/yandex/yandex.module";
+import {ZoneModule} from "./zone/zone.module";
 
 
 @Module({
@@ -16,6 +17,7 @@ import {YandexModule} from "./core/yandex/yandex/yandex.module";
       ArtnetModule,
       EffectsModule,
       YandexModule,
+      ZoneModule
   ],
 })
 export class AppModule {}

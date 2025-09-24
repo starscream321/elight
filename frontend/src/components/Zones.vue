@@ -6,8 +6,9 @@ import {computed, onMounted, ref, watch} from "vue";
 import MainBtn from "./MainBtn.vue";
 import AppSlider from "./AppSlider.vue";
 import type {ZoneFromApi, ZoneFrontend} from "../types/zone.ts";
-import {fetchZones, sendBrightness} from "../api/zones.ts";
-import {iconMap} from "../icons/icons.ts";
+import {fetchZones, sendBrightness,} from "../api/zones.ts";
+import {iconMap} from "../icon/icons.ts";
+import {controlDevice} from "../api/lightControll.ts";
 
 
 
@@ -30,8 +31,8 @@ watch(brightness, (newVal: number) => {
 })
 
 const topZones = computed(() => zones.value.filter(z => z.zone === 'top'))
-const centerZones = computed(() => zones.value.filter(z => z.zone === 'center'))
-const bottomZones = computed(() => zones.value.filter(z => z.zone === 'bottom'))
+const centerZones = computed(() => zones.value.filter(z => z.zone === 'mid'))
+const bottomZones = computed(() => zones.value.filter(z => z.zone === 'bot'))
 </script>
 
 <template>
@@ -46,15 +47,16 @@ const bottomZones = computed(() => zones.value.filter(z => z.zone === 'bottom'))
     class="zones-top"
   >
     <MainBtn
-      v-for="btn in topZones"
-      :name="btn.name"
-      :icon="btn.icon"
-      :key="btn.id"
-      :active="btn.active"
-      :style="{
-        gridColumn: btn.x,
-        gridRow: btn.y,
-      }"
+        v-for="btn in topZones"
+        @click="controlDevice(btn.id, btn.active)"
+        :name="btn.name"
+        :icon="btn.icon"
+        :key="btn.id"
+        :active="btn.active"
+        :style="{
+          gridColumn: btn.x,
+          gridRow: btn.y,
+        }"
     />
   </div>
   <div
@@ -62,6 +64,7 @@ const bottomZones = computed(() => zones.value.filter(z => z.zone === 'bottom'))
   >
     <MainBtn
         v-for="btn in centerZones"
+        @click="updateZoneDevice(btn.id, btn.active)"
         :name="btn.name"
         :icon="btn.icon"
         :key="btn.id"
@@ -77,6 +80,7 @@ const bottomZones = computed(() => zones.value.filter(z => z.zone === 'bottom'))
   >
     <MainBtn
         v-for="btn in bottomZones"
+        @click="updateZoneDevice(btn.id, btn.active)"
         :name="btn.name"
         :icon="btn.icon"
         :key="btn.id"

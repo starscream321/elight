@@ -7,7 +7,7 @@ export interface ZoneFromApi {
     icon: IconKey
     x: number
     y: number
-    zone: 'top' | 'center' | 'bottom'
+    zone: 'top' | 'mid' | 'bot'
     active: boolean
 }
 

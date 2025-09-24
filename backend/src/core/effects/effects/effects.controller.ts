@@ -19,18 +19,18 @@ export class EffectsController {
     async startEffect(
         @Body()
         body: {
-            effect: 'rainbow' | 'fade' | 'fillColor' | 'sound';
+            effect: 'rainbow' | 'fade' | 'fillColor' | 'sound' | 'offLed';
             hueColor?: number;
             fps?: number;
         },
     ) {
-        const { effect, hueColor = 0, fps = 30 } = body;
+        const { effect, hueColor, fps = 30 } = body;
 
         await this.effectsRunner.start(effect, hueColor, fps);
     }
 
     @HttpCode(200)
-    @Post('stop')
+    @Get('stop')
     async stopEffect() {
         this.effectsRunner.stop();
     }

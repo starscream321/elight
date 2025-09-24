@@ -1,67 +1,92 @@
 import { Injectable } from '@nestjs/common';
 import { EffectsService } from './effects.service';
+import { ArtnetService } from '../../artnet/artnet/artnet.service';
 
 const IP_ADDRESS = '192.168.6.11';
 const TOTAL_DIODES = 10000;
 const CHANNELS_PER_PIXEL = 3;
-const MAX_PIXELS_PER_UNIVERSE = Math.floor(512 / CHANNELS_PER_PIXEL);
+const MAX_PIXELS_PER_UNIVERSE = Math.floor(512 / CHANNELS_PER_PIXEL); // 170
 
-const calculateTotalUniverses = (totalDiodes: number) =>
-    Math.ceil(totalDiodes / MAX_PIXELS_PER_UNIVERSE);
+const totalUniverses = Math.ceil(TOTAL_DIODES / MAX_PIXELS_PER_UNIVERSE);
+
+type EffectFn = (length: number, offset?: number, hueColor?: number) => Promise<Uint8Array>;
 
 @Injectable()
 export class EffectsRunnerService {
-    constructor(private readonly effectsService: EffectsService) {}
+    constructor(
+        private readonly effectsService: EffectsService,
+        private readonly artnetService: ArtnetService,
+    ) {}
 
-    private offsets = new Array(calculateTotalUniverses(TOTAL_DIODES)).fill(0);
-    private animationFrame: NodeJS.Timeout | null = null;
+    private offsets = Array.from({ length: totalUniverses }, () => 0);
+    private ticker?: NodeJS.Timeout;
     private fps = 30;
 
-    async start(effectName: string, hueColor: number, fps: number): Promise<boolean> {
-        if (!this.effectsService.getEffectByName(effectName)) return false;
+    private lastTick = 0;
+    private nextTick = 0;
+    private fpsEMA = 0;
 
-        this.stop(); // остановить предыдущий
+    private getEffect(effectName: string): EffectFn | undefined {
+        return this.effectsService.getEffectByName(effectName) as EffectFn | undefined;
+    }
 
-        this.fps = fps;
+    async start(effectName: string, hueColor?: number, fps = 30): Promise<boolean> {
+        const effect = this.getEffect(effectName);
+        if (!effect) return false;
 
-        const totalUniverses = calculateTotalUniverses(TOTAL_DIODES);
+        this.stop();
 
-        const run = async () => {
-            const promises: Promise<void>[] = [];
+        this.fps = Math.max(5, Math.min(60, fps));
+        this.lastTick = Date.now();
+        this.nextTick = this.lastTick;
 
-            const effectFn = this.effectsService.getEffectByName(effectName);
-            if (!effectFn) {
-                console.warn(`Unknown effect: ${effectName}`);
-                return;
+        const loop = async () => {
+            const now = Date.now();
+            const interval = 1000 / this.fps;
+
+            if (now >= this.nextTick) {
+                this.nextTick += interval;
+                if (now - this.nextTick > interval) this.nextTick = now + interval;
+
+                for (let universe = 0; universe < totalUniverses; universe++) {
+                    const startPixel = universe * MAX_PIXELS_PER_UNIVERSE;
+                    const remaining = TOTAL_DIODES - startPixel;
+                    const length = Math.max(0, Math.min(MAX_PIXELS_PER_UNIVERSE, remaining));
+                    if (length <= 0) continue;
+
+                    this.offsets[universe] = (this.offsets[universe] + 1) % length;
+
+                    try {
+                        // 1. эффект формирует кадр
+                        const frame = await effect(length, this.offsets[universe], hueColor);
+
+                        // 2. Runner сам отправляет (Buffer!)
+                        await this.artnetService.sendPacket(Buffer.from(frame), universe, IP_ADDRESS);
+                    } catch (e) {
+                        // console.error(`Effect error u${universe}:`, e);
+                    }
+                }
+
+                // замер FPS
+                const dt = now - this.lastTick;
+                if (dt > 0) {
+                    const inst = 1000 / dt;
+                    this.fpsEMA = this.fpsEMA ? this.fpsEMA + (inst - this.fpsEMA) * 0.1 : inst;
+                }
+                this.lastTick = now;
             }
 
-            for (let universe = 0; universe < totalUniverses; universe++) {
-                const length = MAX_PIXELS_PER_UNIVERSE;
-                this.offsets[universe] = (this.offsets[universe] + 1) % length;
-
-                promises.push(
-                    effectFn(
-                        universe,
-                        IP_ADDRESS,
-                        length,
-                        this.offsets[universe],
-                        hueColor,
-                    )
-                );
-            }
-
-            await Promise.all(promises);
-            this.animationFrame = setTimeout(run, 1000 / this.fps);
+            this.ticker = setTimeout(loop, 1);
         };
 
-        await run();
+        this.ticker = setTimeout(loop, 0);
         return true;
     }
 
     stop() {
-        if (this.animationFrame) {
-            clearTimeout(this.animationFrame);
-            this.animationFrame = null;
+        if (this.ticker) {
+            clearTimeout(this.ticker);
+            this.ticker = undefined;
         }
     }
 }

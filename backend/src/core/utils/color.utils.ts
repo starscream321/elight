@@ -1,4 +1,4 @@
-function hsvToRgb (h: number, s: number, v: number) {
+export function hsvToRgb (h: number, s: number, v: number) {
     let r: number, g: number, b: number;
 
     h = h % 360;
@@ -49,7 +49,7 @@ function hsvToRgb (h: number, s: number, v: number) {
 };
 
 
-function createColorArray(
+export function createColorArray(
     length: number,
     mapper: (i: number) => [number, number, number]
 ): number[] {

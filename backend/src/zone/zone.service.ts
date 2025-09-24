@@ -14,6 +14,13 @@ export class ZoneService {
         return this.zoneRepo.find();
     }
 
+    updateZone(id: string, active: boolean) {
+        return this.zoneRepo.update(
+            { id },
+            { active }
+        );
+    }
+
     create(zone: Partial<Zone>) {
         const newZone = this.zoneRepo.create(zone);
         return this.zoneRepo.save(newZone);
