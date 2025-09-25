@@ -1,7 +1,7 @@
 import {Entity, Column, PrimaryColumn} from 'typeorm';
 
 @Entity()
-export class Zone {
+export class YandexLights {
     @PrimaryColumn('uuid')
     id: string;
 
