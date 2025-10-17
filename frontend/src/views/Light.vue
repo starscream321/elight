@@ -63,6 +63,9 @@ const isActive = (btn: string) => btn === activeBtn.value;
     border: none;
     color: rgba(255, 255, 255, 1);
     background-color: transparent;
+    font-family: "SF Pro Rounded", sans-serif;
+    font-size: 20px;
+    font-weight: 500;
   }
 
   .switcher_btn.active {

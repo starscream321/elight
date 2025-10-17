@@ -13,19 +13,11 @@ import { Repository, UpdateResult } from 'typeorm';
 import { AxiosError } from 'axios';
 import { lastValueFrom } from 'rxjs';
 import { YandexLights } from './yandex.entity';
+import * as process from "node:process";
+import {actionBrightness, actionOnOff, actionTemperatureK, YandexAction} from "./types/yandex.actions";
 
-type TargetType = 'device' | 'groups';
+type TargetType = 'devices' | 'groups';
 
-interface YandexAction {
-    type:
-        | 'devices.capabilities.on_off'
-        | 'devices.capabilities.range'
-        | 'devices.capabilities.color_setting';
-    state: {
-        instance: 'on' | 'brightness' | 'temperature_k';
-        value: boolean | number;
-    };
-}
 
 @Injectable()
 export class YandexService {
@@ -37,6 +29,7 @@ export class YandexService {
         @InjectRepository(YandexLights)
         private readonly yandexRepo: Repository<YandexLights>,
     ) {}
+
 
     private async sendApi(
         targetType: TargetType,
@@ -50,15 +43,25 @@ export class YandexService {
         }
 
         try {
-            await lastValueFrom(
+            const response = await lastValueFrom(
                 this.http.post(
-                    `${this.apiUrl}/${targetType}/${id}/actions`,
-                    { actions },
+                    `${this.apiUrl}/${targetType}/actions`,
+                    {
+                        [targetType]: [
+                            {
+                                id,
+                                actions,
+                            },
+                        ],
+                    },
                     {
                         headers: { Authorization: `Bearer ${token}` },
                         timeout: 10_000,
                     },
                 ),
+            );
+            this.logger.log(
+                `Ответ Yandex API [${targetType}/${id}]: ${JSON.stringify(response.data, null, 2)}`,
             );
         } catch (err) {
             const e = err as AxiosError<any>;
@@ -90,12 +93,12 @@ export class YandexService {
         }
     }
 
-    async updateZone(id: string, active: boolean): Promise<void> {
+    async updateZone(id: string, active?: boolean): Promise<void> {
         try {
-            const res: UpdateResult = await this.yandexRepo.update({ id }, { active });
-            if (!res.affected) {
-                throw new NotFoundException(`Устройство с id "${id}" не найдено`);
-            }
+                const res: UpdateResult = await this.yandexRepo.update({ id }, { active });
+                if (!res.affected) {
+                    throw new NotFoundException(`Устройство с id "${id}" не найдено`);
+                }
         } catch (e) {
             if (e instanceof NotFoundException) throw e;
             this.logger.error(`Ошибка обновления устройства ${id} в БД`, (e as Error).stack);
@@ -116,8 +119,8 @@ export class YandexService {
     }
 
 
-    findAll(): Promise<YandexLights[]> {
-        return this.yandexRepo.find();
+    async findAll(): Promise<YandexLights[]> {
+        return await this.yandexRepo.find();
     }
 
     async create(zone: Partial<YandexLights>): Promise<YandexLights> {
@@ -133,90 +136,69 @@ export class YandexService {
 
     async controlDevice(
         id: string,
-        on: boolean,
+        on?: boolean,                 // ← сделал опциональным
         brightness?: number,
         temperature_k?: number,
     ): Promise<void> {
-        this.validateLightParams(brightness, temperature_k);
+        // нормализация и валидация входа
+        const actions: YandexAction[] = [];
 
-        const actions: YandexAction[] = [
-            {
-                type: 'devices.capabilities.on_off',
-                state: { instance: 'on', value: on },
-            },
-        ];
-
-
-        if (brightness !== undefined) {
-            actions.push({
-                type: 'devices.capabilities.range',
-                state: { instance: 'brightness', value: brightness },
-            });
+        if (typeof on === 'boolean') {
+            actions.push(actionOnOff(on));
+        }
+        if (typeof brightness === 'number') {
+            actions.push(actionBrightness(brightness));
+        }
+        if (typeof temperature_k === 'number') {
+            actions.push(actionTemperatureK(temperature_k));
         }
 
-        if (temperature_k !== undefined) {
-            actions.push({
-                type: 'devices.capabilities.color_setting',
-                state: { instance: 'temperature_k', value: temperature_k },
-            });
+        if (actions.length === 0) {
+            throw new BadRequestException('Не передано ни одного действия');
         }
 
-        // Сначала обновим локальное состояние в БД (чтобы UI быстрее отражал изменения)
-        await this.updateZone(id, on);
+        try {
+            await this.sendApi('devices', id, actions);
+            if (on !== undefined) {
+                await this.updateZone(id, on);
+            }
+        } catch (e) {
 
-        // Затем отправим команду во внешний API
-        await this.sendApi('device', id, actions);
+            throw e;
+        }
     }
 
     async controlGroup(
         id: string,
-        on: boolean,
+        on?: boolean,
         brightness?: number,
         temperature_k?: number,
     ): Promise<void> {
         this.validateLightParams(brightness, temperature_k);
 
-        const actions: YandexAction[] = [
-            {
-                type: 'devices.capabilities.on_off',
-                state: { instance: 'on', value: on },
-            },
-        ];
+        const actions: YandexAction[] = [];
 
-        if (brightness !== undefined) {
-            actions.push({
-                type: 'devices.capabilities.range',
-                state: { instance: 'brightness', value: brightness },
-            });
+        if (typeof on === 'boolean') {
+            actions.push(actionOnOff(on));
+        }
+        if (typeof brightness === 'number') {
+            actions.push(actionBrightness(brightness));
+        }
+        if (typeof temperature_k === 'number') {
+            actions.push(actionTemperatureK(temperature_k));
         }
 
-        if (temperature_k !== undefined) {
-            actions.push({
-                type: 'devices.capabilities.color_setting',
-                state: { instance: 'temperature_k', value: temperature_k },
-            });
+        if (actions.length === 0) {
+            throw new BadRequestException('Не передано ни одного действия');
         }
 
         await this.sendApi('groups', id, actions);
     }
 
-    async controlBrightness(id: string, brightness: number): Promise<void> {
-        this.validateLightParams(brightness);
-
-        const actions: YandexAction[] = [
-            {
-                type: 'devices.capabilities.range',
-                state: { instance: 'brightness', value: brightness },
-            },
-        ];
-
-        await this.sendApi('device', id, actions);
-    }
-
 
     async controlDevices(
         ids: string[],
-        on: boolean,
+        on?: boolean,
         brightness?: number,
         temperature_k?: number,
     ): Promise<void> {
@@ -238,7 +220,7 @@ export class YandexService {
 
     async controlGroups(
         ids: string[],
-        on: boolean,
+        on?: boolean,
         brightness?: number,
         temperature_k?: number,
     ): Promise<void> {

@@ -1,4 +1,4 @@
-import { Injectable, InternalServerErrorException } from '@nestjs/common';
+import {Injectable, InternalServerErrorException, NotFoundException} from '@nestjs/common';
 import { createColorArray, hsvToRgb } from '../../utils/color.utils';
 import { getAudioSpectrum } from '../../utils/audio.utils';
 import { Effect } from './effects.entity';
@@ -11,14 +11,11 @@ export class EffectsService {
         @InjectRepository(Effect)
         private effectRepo: Repository<Effect>,
     ) {}
-
-    // --- helpers ---
-
     private smoothed = { bass: 0, mid: 0, treble: 0 };
-
     private barLevels: number[] = [0, 0, 0];
 
-// Функция сглаживания
+
+
     private smoothValue(curr: number, prev: number, rise = 0.3, fall = 0.1) {
         const alpha = curr > prev ? rise : fall; // вверх быстрее, вниз медленнее
         return prev + (curr - prev) * alpha;
@@ -32,21 +29,20 @@ export class EffectsService {
         return frame;
     }
 
-    // --- эффекты ---
 
-    async rainbow(length: number, offset: number): Promise<Uint8Array> {
+    async rainbow(length: number, offset: number, brightness: number): Promise<Uint8Array> {
         const data = createColorArray(length, (i) => {
             const hue = (((i + offset) % length) / length) * 360;
-            const [r, g, b] = hsvToRgb(hue, 1, 0.5);
+            const [r, g, b] = hsvToRgb(hue, 1, brightness);
             return [g, r, b];
         }).flat();
         return this.padFrame(data);
     }
 
-    async smoothFade(length: number, offset: number, hueColor: number): Promise<Uint8Array> {
+    async smoothFade(length: number, offset: number, brightness: number, hueColor: number): Promise<Uint8Array> {
         const fadeDuration = 170;
         const half = fadeDuration / 2;
-        const [r, g, b] = hsvToRgb(hueColor, 1, 1);
+        const [r, g, b] = hsvToRgb(hueColor, 1, brightness);
 
         const computeIntensity = (color: number, offs: number) => {
             const t = offs % fadeDuration;
@@ -65,8 +61,8 @@ export class EffectsService {
         return this.padFrame(data);
     }
 
-    async fillColor(length: number, hueColor: number): Promise<Uint8Array> {
-        const [r, g, b] = hsvToRgb(hueColor, 1, 1); // значения 0..255
+    async fillColor(length: number, brightness: number, hueColor: number): Promise<Uint8Array> {
+        const [r, g, b] = hsvToRgb(hueColor, 1, brightness); // значения 0..255
 
         const frame = new Uint8Array(length * 3);
         for (let i = 0; i < length; i++) {
@@ -81,13 +77,12 @@ export class EffectsService {
 
 
     async off(length: number): Promise<Uint8Array> {
-        // один вызов — вся лента гаснет
         return new Uint8Array(length * 3); // все нули
     }
 
 
 
-    async soundBars(length: number, offset: number): Promise<Uint8Array> {
+    async soundBars(length: number, offset: number, brightness: number): Promise<Uint8Array> {
         const spectrum = getAudioSpectrum();
 
         // Сглаживание самих спектров (чтобы не прыгали)
@@ -111,17 +106,13 @@ export class EffectsService {
             const start = idx * segment;
             const end = (idx === bands.length - 1) ? length : start + segment;
 
-            // целевая высота в пикселях
             const targetHeight = Math.floor((end - start) * Math.min(1, band.value));
 
-            // текущая высота
             let current = this.barLevels[idx];
 
             if (targetHeight > current) {
-                // рост → поднимаем быстрее
                 current = current + (targetHeight - current) * riseSpeed;
             } else if (targetHeight < current) {
-                // падение → медленно сползаем вниз
                 current = Math.max(0, current - fallSpeed);
             }
 
@@ -133,12 +124,10 @@ export class EffectsService {
                 const pos = i - start;
                 let v = pos < barHeight ? 1 : 0;
 
-                // затухание сверху (мягкий край)
                 if (pos >= barHeight && pos < barHeight + 2) {
-                    v = 0.5;
+                    v = brightness;
                 }
 
-                // цвет бара (радужный перелив)
                 const hue = (band.hueBase + offset * 2 + pos * 3) % 360;
                 const [r, g, b] = hsvToRgb(hue, 1, v);
 
@@ -150,16 +139,13 @@ export class EffectsService {
     }
 
 
-    // --- map ---
-
     getEffectByName(effectName: string):
-        ((length: number, offset?: number, hueColor?: number) => Promise<Uint8Array>) | undefined {
+        ((length: number, brightness: number, offset?: number, hueColor?: number) => Promise<Uint8Array>) | undefined {
         const map = {
-            // эффекты, где нужен offset
-            rainbow: (length: number, offset = 0) => this.rainbow(length, offset),
-            sound:   (length: number, offset = 0) => this.soundBars(length, offset),
-
-            fillColor: (length: number, _offset?: number, hueColor = 0) => this.fillColor(length, hueColor),
+            rainbow: (length: number, offset = 0, brightness: number) => this.rainbow(length, offset, brightness),
+            soundBars:   (length: number, offset = 0, brightness: number) => this.soundBars(length, offset, brightness),
+            fillColor: (length: number, brightness: number, _offset?: number, hueColor = 0) => this.fillColor(length, brightness, hueColor),
+            smoothFade: (length: number, offset = 0, brightness: number,  hueColor = 0) => this.smoothFade(length, brightness, offset, hueColor),
             off:       (length: number) => this.off(length),
         } as const;
 
@@ -174,4 +160,23 @@ export class EffectsService {
             throw new InternalServerErrorException(e, 'Эффекты не найдены');
         }
     }
+
+
+    async updateEffectStatus(id: number, active: boolean) {
+        if (active) {
+            await this.effectRepo
+                .createQueryBuilder()
+                .update()
+                .set({ active: false })
+                .where('id != :id', { id })
+                .execute();
+        }
+
+        const result = await this.effectRepo.update(id, { active });
+
+        if (result.affected === 0) {
+            throw new NotFoundException(`Эффект с id ${id} не найден`);
+        }
+    }
 }
+

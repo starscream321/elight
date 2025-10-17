@@ -1,10 +1,10 @@
+export type IconLightsKey = 'tv' | 'table' | 'massage' | 'desktop' | 'ceiling' | 'entrance' | 'locker' | 'floor'
 
-export type IconKey = 'tv' | 'table' | 'massage' | 'desktop' | 'ceiling' | 'entrance' | 'locker' | 'floor'
 
 export interface ZoneFromApi {
     id: string
     name: string
-    icon: IconKey
+    icon: IconLightsKey
     x: number
     y: number
     zone: 'top' | 'mid' | 'bot'

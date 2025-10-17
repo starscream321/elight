@@ -9,6 +9,7 @@ import {
     Param,
     UsePipes,
     ValidationPipe,
+    Logger
 } from '@nestjs/common';
 import { YandexService } from './yandex.service';
 import { YandexLights } from './yandex.entity';
@@ -18,11 +19,12 @@ import {
     ControlManyDto,
     CreateLightDto,
     UpdateActiveDto,
-} from '../../dto/control.dto';
+} from './dto/control.dto';
 
 @Controller('yandex')
 @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
 export class YandexController {
+    private readonly logger = new Logger(YandexController.name);
     constructor(private readonly yandexService: YandexService) {}
 
 
@@ -71,12 +73,12 @@ export class YandexController {
         return this.yandexService.findAll();
     }
 
-    @Post('/device')
+    @Post('/createDevice')
     async createDevice(@Body() body: CreateLightDto): Promise<YandexLights> {
         return this.yandexService.create(body as Partial<YandexLights>);
     }
 
-    @Patch('/device/:id/active')
+    @Patch('/updateDevice/:id')
     async updateDeviceActive(
         @Param('id') id: string,
         @Body() body: UpdateActiveDto,

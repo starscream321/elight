@@ -9,7 +9,7 @@ const MAX_PIXELS_PER_UNIVERSE = Math.floor(512 / CHANNELS_PER_PIXEL); // 170
 
 const totalUniverses = Math.ceil(TOTAL_DIODES / MAX_PIXELS_PER_UNIVERSE);
 
-type EffectFn = (length: number, offset?: number, hueColor?: number) => Promise<Uint8Array>;
+type EffectFn = (length: number, brightness: number, offset?: number, hueColor?: number) => Promise<Uint8Array>;
 
 @Injectable()
 export class EffectsRunnerService {
@@ -30,13 +30,13 @@ export class EffectsRunnerService {
         return this.effectsService.getEffectByName(effectName) as EffectFn | undefined;
     }
 
-    async start(effectName: string, hueColor?: number, fps = 30): Promise<boolean> {
+    async start(effectName: string, brightness: number, hueColor?: number): Promise<boolean> {
         const effect = this.getEffect(effectName);
         if (!effect) return false;
 
         this.stop();
 
-        this.fps = Math.max(5, Math.min(60, fps));
+        this.fps = Math.max(5, Math.min(60, 30));
         this.lastTick = Date.now();
         this.nextTick = this.lastTick;
 
@@ -58,7 +58,7 @@ export class EffectsRunnerService {
 
                     try {
                         // 1. эффект формирует кадр
-                        const frame = await effect(length, this.offsets[universe], hueColor);
+                        const frame = await effect(length, this.offsets[universe], hueColor, brightness);
 
                         // 2. Runner сам отправляет (Buffer!)
                         await this.artnetService.sendPacket(Buffer.from(frame), universe, IP_ADDRESS);

@@ -1,41 +1,52 @@
 <script setup lang="ts">
 import AppSlider from "./AppSlider.vue";
-import {onMounted, ref} from "vue";
+import {onMounted, ref, shallowRef, watch} from "vue";
 import MainBtn from "./MainBtn.vue";
 
-import AuroraIcon from '../assets/icons/aurora.svg'
-import MusicIcon from '../assets/icons/music.svg'
-import PulseIcon from '../assets/icons/pulse.svg'
-import EffectOffIcon from '../assets/icons/effects-off.svg'
-import CometIcon from '../assets/icons/comet.svg'
-import RainbowIcon from '../assets/icons/rainbow.svg'
 import ColorRing from "./ColorRing.vue";
-import type { RgbIconKey, RgbFrontend, RgbFromApi } from "../types/rgb.ts";
-import axios from "axios";
+import type {EffectFromApi, EffectFrontend} from "../types/rgb.ts";
+import {getEffects, sendEffect} from "../api/effects.ts";
+import { iconMapEffects } from "../icon/icons.ts";
 
 
 
-
+const effects = shallowRef<EffectFrontend[]>([])
 const brightness = ref(0)
-const color = ref(null)
+const color = ref('')
 
-const iconMap: Record<RgbIconKey, String> = {
-  effectOff: EffectOffIcon,
-  comet: CometIcon,
-  pulse: PulseIcon,
-  rainbow: RainbowIcon,
-  music: MusicIcon,
-  aurora: AuroraIcon
+const getBrightnessFromLocalStorage = () => {
+  const storageBrightness = localStorage.getItem('rgb_brightness')
+  brightness.value = storageBrightness ? JSON.parse(storageBrightness) * 100 : 0;
 }
 
-const effects = ref<RgbFrontend[]>([])
+const normalizeBrightness = (brightness: number) => brightness / 100
+
+
+const fetchEffects = async () => {
+  const data = await getEffects()
+  effects.value = [...data.map((effect: EffectFromApi) => ({
+    ...effect,
+    icon: iconMapEffects[effect.icon],
+  }))]
+}
+
+
+
+const handleControl = async (id: number, effect: string, brightness: number, color?: string, active?: boolean) => {
+  await sendEffect(id, effect, brightness, active, color)
+  await fetchEffects()
+}
 
 onMounted(async () => {
-  const res = await axios.get('/api/effect')
-  effects.value = res.data.map((effect: RgbFromApi) => ({
-    ...effect,
-    icon: iconMap[effect.icon]
-  }))
+  getBrightnessFromLocalStorage()
+  await fetchEffects()
+})
+
+watch([color, brightness], async ([newColor, newBrightness]) => {
+  const activeEffect = effects.value.find(e => e.active)
+  if (activeEffect) {
+    await handleControl(activeEffect.id, activeEffect.name, normalizeBrightness(newBrightness), newColor)
+  }
 })
 
 
@@ -54,6 +65,8 @@ onMounted(async () => {
     >
       <MainBtn
           v-for="effect in effects"
+          @click="handleControl(effect.id, effect.effect, normalizeBrightness(brightness), color, effect.active)"
+          :key="effect.id"
           :name="effect.name"
           :icon="effect.icon"
           :active="effect.active"
@@ -68,6 +81,7 @@ onMounted(async () => {
 <style scoped>
 .rgb-container {
   display: flex;
+  width: 100%;
   flex-direction: column;
   align-items: center;
   gap: 54px;

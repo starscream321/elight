@@ -1,14 +1,15 @@
-export type RgbIconKey = 'effectOff' | 'music' | 'pulse' | 'comet' | 'rainbow' | 'aurora'
+export type IconEffectsKey = 'music' | 'pulse' | 'comet' | 'rainbow' | 'aurora' | 'effectsOff'
 
-export interface RgbFromApi {
-    id: string
+export interface EffectFromApi {
+    id: number
     name: string
-    icon: RgbIconKey
+    effect: string
+    icon: IconEffectsKey
     active: boolean
 }
 
 import type { Component } from 'vue'
 
-export interface RgbFrontend extends Omit<RgbFromApi, 'icon'> {
+export interface EffectFrontend extends Omit<EffectFromApi, 'icon'> {
     icon: Component
 }

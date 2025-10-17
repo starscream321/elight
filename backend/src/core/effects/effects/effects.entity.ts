@@ -9,6 +9,9 @@ export class Effect {
     name: string;
 
     @Column()
+    effect: string;
+
+    @Column()
     icon: string;
 
     @Column({ default: false })

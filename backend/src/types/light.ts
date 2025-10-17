@@ -1,13 +1,13 @@
 interface Light {
     id: string,
-    on: boolean,
+    on?: boolean,
     brightness?: number,
     temperature_k?: number,
 }
 
 interface Lights {
     ids: string[],
-    on: boolean,
+    on?: boolean,
     brightness?: number,
     temperature_k?: number,
 }

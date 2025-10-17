@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
 
+
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const cursorRef = ref<HTMLDivElement | null>(null)
 
@@ -98,7 +99,6 @@ function getHueFromCoords({ x, y }: { x: number; y: number }) {
 async function updateColorFromCoords(pos: { x: number; y: number }) {
   hue.value = getHueFromCoords(pos)
   color.value = `hsl(${hue.value}, 100%, 50%)`
-  await nextTick()  // ждем обновления реактивных данных
   updateCursor()
 }
 

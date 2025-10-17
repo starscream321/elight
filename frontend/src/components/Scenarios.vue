@@ -7,10 +7,10 @@ import Default_light_icon from "../assets/icons/default-light.svg";
 import Games_icon from "../assets/icons/games.svg";
 import Party_icon from "../assets/icons/party.svg";
 import Romance_icon from "../assets/icons/romance.svg";
-import {ref} from "vue";
+import {shallowRef} from "vue";
 
 
-const buttons = ref<any[]>([
+const buttons = shallowRef<any[]>([
   {
     name: "Яркий",
     icon: Lightness_max_icon,

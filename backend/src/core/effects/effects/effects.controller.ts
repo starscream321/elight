@@ -16,17 +16,20 @@ export class EffectsController {
 
     @HttpCode(200)
     @Post('start')
-    async startEffect(
-        @Body()
-        body: {
-            effect: 'rainbow' | 'fade' | 'fillColor' | 'sound' | 'offLed';
+    async startEffect(@Body() body: {
+            id: number;
+            effect: string;
+            active: boolean
             hueColor?: number;
             fps?: number;
+            brightness?: number;
         },
     ) {
-        const { effect, hueColor, fps = 30 } = body;
+        const { id, active, effect, hueColor, brightness = 0.5 } = body;
+        console.log(body);
 
-        await this.effectsRunner.start(effect, hueColor, fps);
+        await this.effectsRunner.start(effect, brightness, hueColor);
+        await this.effectService.updateEffectStatus(id, active)
     }
 
     @HttpCode(200)

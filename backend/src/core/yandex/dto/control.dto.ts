@@ -6,15 +6,20 @@ import {
     IsString,
     IsNumber,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 
 export class ControlSingleDto {
     @IsString()
     id!: string;
 
+    @IsOptional()
     @IsBoolean()
-    @Type(() => Boolean)
-    on!: boolean;
+    @Transform(({ value }) => {
+        if (value === 'true') return true;
+        if (value === 'false') return false;
+        return value;
+    })
+    on?: boolean;
 
     @IsOptional()
     @IsNumber()
@@ -27,16 +32,20 @@ export class ControlSingleDto {
     temperature_k?: number;
 }
 
-
 export class ControlManyDto {
     @IsArray()
     @ArrayNotEmpty()
     @IsString({ each: true })
     ids!: string[];
 
+    @IsOptional()
     @IsBoolean()
-    @Type(() => Boolean)
-    on!: boolean;
+    @Transform(({ value }) => {
+        if (value === 'true') return true;
+        if (value === 'false') return false;
+        return value;
+    })
+    on?: boolean;
 
     @IsOptional()
     @IsNumber()
@@ -58,9 +67,7 @@ export class CreateLightDto {
     @IsBoolean()
     @Type(() => Boolean)
     active?: boolean;
-
 }
-
 
 export class UpdateActiveDto {
     @IsBoolean()

@@ -1,34 +1,51 @@
 <script setup lang="ts">
 
 
-
-import {computed, onMounted, ref, watch} from "vue";
+import {computed, onMounted, ref, shallowRef, watch} from "vue";
 import MainBtn from "./MainBtn.vue";
 import AppSlider from "./AppSlider.vue";
 import type {ZoneFromApi, ZoneFrontend} from "../types/zone.ts";
-import {fetchZones, sendBrightness,} from "../api/zones.ts";
-import {iconMap} from "../icon/icons.ts";
-import {controlDevice} from "../api/lightControll.ts";
+import {iconMapLights} from "../icon/icons.ts";
+import {controlDevice, fetchLights, sendBrightness} from "../api/lightControll.ts";
 
 
 
 
-const brightness = ref(0)
+const brightness = ref<number>(0)
 
-const zones = ref<ZoneFrontend[]>([])
+const zones = shallowRef<ZoneFrontend[]>([])
 
+
+const getBrightnessFromLocalStorage = () => {
+  const storageBrightness = localStorage.getItem('brightness')
+  brightness.value = storageBrightness ? JSON.parse(storageBrightness) : 0;
+}
+
+
+const updateZones = async () => {
+  const data = await fetchLights()
+  zones.value = [...data.map((zone: ZoneFromApi) => ({
+    ...zone,
+    icon: iconMapLights[zone.icon],
+  }))]
+}
+
+const handleControl = async (id: string, active: boolean) => {
+  await controlDevice(id, active)
+  await updateZones()
+}
 
 onMounted(async () => {
-  const data = await fetchZones()
-  zones.value = data.map((zone: ZoneFromApi) => ({
-    ...zone,
-    icon: iconMap[zone.icon],
-  }))
+  await updateZones()
+  getBrightnessFromLocalStorage()
 })
 
-watch(brightness, (newVal: number) => {
-  sendBrightness(newVal)
-})
+watch(brightness, (val: number) => {
+  const activeIds = zones.value.filter(z => z.active).map(z => z.id);
+  if (activeIds.length) {
+    sendBrightness(val, activeIds);
+  }
+});
 
 const topZones = computed(() => zones.value.filter(z => z.zone === 'top'))
 const centerZones = computed(() => zones.value.filter(z => z.zone === 'mid'))
@@ -48,7 +65,7 @@ const bottomZones = computed(() => zones.value.filter(z => z.zone === 'bot'))
   >
     <MainBtn
         v-for="btn in topZones"
-        @click="controlDevice(btn.id, btn.active)"
+        @click="handleControl(btn.id, btn.active)"
         :name="btn.name"
         :icon="btn.icon"
         :key="btn.id"
@@ -64,7 +81,7 @@ const bottomZones = computed(() => zones.value.filter(z => z.zone === 'bot'))
   >
     <MainBtn
         v-for="btn in centerZones"
-        @click="updateZoneDevice(btn.id, btn.active)"
+        @click="handleControl(btn.id, btn.active)"
         :name="btn.name"
         :icon="btn.icon"
         :key="btn.id"
@@ -80,7 +97,7 @@ const bottomZones = computed(() => zones.value.filter(z => z.zone === 'bot'))
   >
     <MainBtn
         v-for="btn in bottomZones"
-        @click="updateZoneDevice(btn.id, btn.active)"
+        @click="handleControl(btn.id, btn.active)"
         :name="btn.name"
         :icon="btn.icon"
         :key="btn.id"

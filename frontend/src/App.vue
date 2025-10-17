@@ -17,6 +17,7 @@ import Footer from './components/Footer.vue';
   height: 1180px;
   display: flex;
   flex-direction: column;
+  font-family: "SF Pro Rounded", sans-serif;
 }
 
 .main-content {
