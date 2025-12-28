@@ -1,8 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import {ArtnetModule} from "./core/artnet/artnet/artnet.module";
-import {EffectsModule} from "./core/effects/effects/effects.module";
+import {ArtnetModule} from "./core/artnet/artnet.module";
+import {EffectsModule} from "./core/effects/effects.module";
 import {YandexModule} from "./core/yandex/yandex.module";
 
 

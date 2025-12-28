@@ -12,8 +12,15 @@ import PulseIcon from '../assets/icons/pulse.svg';
 import RainbowIcon from '../assets/icons/rainbow.svg';
 import AuroraIcon from '../assets/icons/aurora.svg';
 import MusicIcon from '../assets/icons/music.svg';
+import LightnessMaxIcon from '../assets/icons/lightness-max.svg';
+import NightIcon from '../assets/icons/night.svg';
+import DefaultLightIcon from '../assets/icons/default-light.svg';
+import GamesIcon from '../assets/icons/games.svg';
+import PartyIcon from '../assets/icons/party.svg';
+import RomanceIcon from '../assets/icons/romance.svg';
 import type {IconLightsKey} from '../types/zone';
 import type {IconEffectsKey} from "../types/rgb.ts";
+import type {IconScenariosKey} from "../types/scenarios.ts";
 
 export const iconMapLights: Record<IconLightsKey, any> = {
     floor: FlorIcon,
@@ -33,5 +40,14 @@ export const iconMapEffects: Record<IconEffectsKey, any> = {
     rainbow: RainbowIcon,
     music: MusicIcon,
     aurora: AuroraIcon,
+}
+
+export const iconMapScenarios: Record<IconScenariosKey, any> = {
+    lightness_max: LightnessMaxIcon,
+    night: NightIcon,
+    default_light: DefaultLightIcon,
+    games: GamesIcon,
+    party: PartyIcon,
+    romance: RomanceIcon,
 }
 

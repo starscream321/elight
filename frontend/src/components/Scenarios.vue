@@ -1,67 +1,41 @@
 <script setup lang="ts">
 
 import MainBtn from "./MainBtn.vue";
-import Lightness_max_icon from "../assets/icons/lightness-max.svg";
-import Night_icon from "../assets/icons/night.svg";
-import Default_light_icon from "../assets/icons/default-light.svg";
-import Games_icon from "../assets/icons/games.svg";
-import Party_icon from "../assets/icons/party.svg";
-import Romance_icon from "../assets/icons/romance.svg";
-import {shallowRef} from "vue";
+import {controlScenarios, fetchScenarios} from "../api/lightControll.ts";
+import type {ScenariosFromApi, ScenariosFrontend} from "../types/scenarios.ts";
+import {shallowRef, onMounted} from "vue";
+import {iconMapScenarios} from "../icon/icons.ts";
 
+const scenarios = shallowRef<ScenariosFrontend[]>([])
 
-const buttons = shallowRef<any[]>([
-  {
-    name: "Яркий",
-    icon: Lightness_max_icon,
-    active: false
-  },
-  {
-    name: "Ночной",
-    icon: Night_icon,
-    active: false
-  },
-  {
-    name: "Стандарт",
-    icon: Default_light_icon,
-    active: false
-  },
-  {
-    name: "Игры и кино",
-    icon: Games_icon,
-    active: false
-  },
-  {
-    name: "Вечеринка",
-    icon: Party_icon,
-    active: false
-  },
-  {
-    name: "Романтика",
-    icon: Romance_icon,
-    active: false
-  }
-])
-
-
-const switchBtn = (name: string) => {
-  buttons.value = buttons.value.map(btn => ({
-    ...btn,
-    active: btn.name === name
-  }));
+const updateScenarios = async () => {
+  const data = await fetchScenarios()
+  scenarios.value = [...data.map((value: ScenariosFromApi) => ({
+    ...value,
+    icon: iconMapScenarios[value.icon],
+  }))]
 }
+
+const handleClick = async (id: string) => {
+  await controlScenarios(id)
+}
+
+onMounted(async () => {
+  await updateScenarios()
+})
+
 
 </script>
 
 <template>
   <div class="buttons-scenarios">
     <MainBtn
-        v-for="btn in buttons"
-        @click="switchBtn(btn.name)"
-        :key="btn.name"
+        v-for="btn in scenarios"
+        :key="btn.id"
         :name="btn.name"
         :icon="btn.icon"
-        :active="btn.active"
+        @click="handleClick(btn.id)"
+        :active="false"
     />
   </div>
 </template>

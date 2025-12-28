@@ -3,10 +3,10 @@ import { YandexController } from './yandex.controller';
 import { YandexService } from './yandex.service';
 import {HttpModule} from "@nestjs/axios";
 import {TypeOrmModule} from "@nestjs/typeorm";
-import {YandexLights} from "./yandex.entity";
+import {YandexLights, YandexScenarios} from "./yandex.entity";
 
 @Module({
-  imports: [HttpModule, TypeOrmModule.forFeature([YandexLights])],
+  imports: [HttpModule, TypeOrmModule.forFeature([YandexLights, YandexScenarios])],
   controllers: [YandexController],
   providers: [YandexService]
 })

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
@@ -11,7 +11,7 @@ const radius = 181
 const thickness = 55
 
 // Hue — просто число от 0 до 360
-const hue = defineModel()
+const hue = defineModel<number>({default: 0})
 const color = ref(`hsl(0, 100%, 50%)`)
 
 const dragging = ref(false)

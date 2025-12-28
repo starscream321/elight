@@ -58,6 +58,12 @@ export class ControlManyDto {
     temperature_k?: number;
 }
 
+export class ControlScenarioDto {
+    @IsString()
+    scenarios_id!: string;
+
+}
+
 export class CreateLightDto {
     @IsOptional()
     @IsString()

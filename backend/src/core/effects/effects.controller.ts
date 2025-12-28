@@ -33,6 +33,20 @@ export class EffectsController {
     }
 
     @HttpCode(200)
+    @Post('brightness')
+    setBrightness(@Body() body: { brightness: number }) {
+        this.effectsRunner.updateBrightness(body.brightness);
+        return { ok: true };
+    }
+
+    @HttpCode(200)
+    @Post('color')
+    setColor(@Body() body: { color: number }) {
+        this.effectsRunner.updateHue(body.color);
+        return { ok: true };
+    }
+
+    @HttpCode(200)
     @Get('stop')
     async stopEffect() {
         this.effectsRunner.stop();

@@ -12,14 +12,16 @@ import {
     Logger
 } from '@nestjs/common';
 import { YandexService } from './yandex.service';
-import { YandexLights } from './yandex.entity';
-import { Light, Lights } from '../../types/light';
+import {YandexLights, YandexScenarios} from './yandex.entity';
+import {Light, Lights, Scenarios} from '../../types/light';
 import {
     ControlSingleDto,
     ControlManyDto,
     CreateLightDto,
     UpdateActiveDto,
+    ControlScenarioDto,
 } from './dto/control.dto';
+
 
 @Controller('yandex')
 @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
@@ -29,20 +31,13 @@ export class YandexController {
 
 
     @HttpCode(200)
-    @Post('/controlGroup')
-    async controlGroup(@Body() body: ControlSingleDto): Promise<Light> {
-        const { id, on, brightness, temperature_k } = body;
-        await this.yandexService.controlGroup(id, on, brightness, temperature_k);
-        return { id, on, brightness, temperature_k };
-    }
-
-    @HttpCode(200)
     @Post('/controlDevice')
     async controlDevice(@Body() body: ControlSingleDto): Promise<Light> {
         const { id, on, brightness, temperature_k } = body;
         await this.yandexService.controlDevice(id, on, brightness, temperature_k);
         return { id, on, brightness, temperature_k };
     }
+
 
     @HttpCode(200)
     @Post('/controlDevices')
@@ -55,27 +50,34 @@ export class YandexController {
         return { ids, on, brightness, temperature_k };
     }
 
+
     @HttpCode(200)
-    @Post('/controlGroups')
-    async controlGroups(@Body() body: ControlManyDto): Promise<Lights> {
-        const { ids, on, brightness, temperature_k } = body;
-        if (!ids.length) {
-            throw new BadRequestException('Поле "ids" не должно быть пустым');
+    @Post('/controlScenarios')
+    async controlScenarios(@Body() body: ControlScenarioDto): Promise<Scenarios> {
+        const { scenarios_id } = body;
+        if (!scenarios_id.length) {
+            throw new BadRequestException('Поле "id" не должно быть пустым');
         }
-        await this.yandexService.controlGroups(ids, on, brightness, temperature_k);
-        return { ids, on, brightness, temperature_k };
+        await this.yandexService.controlScenarios(scenarios_id);
+        return { scenarios_id };
     }
 
 
     @HttpCode(200)
     @Get('/allLights')
     async giveAllLights(): Promise<YandexLights[]> {
-        return this.yandexService.findAll();
+        return this.yandexService.findAllDevices();
+    }
+
+    @HttpCode(200)
+    @Get('/allScenarios')
+    async giveAllScenarios(): Promise<YandexScenarios[]> {
+        return this.yandexService.findAllScenarios();
     }
 
     @Post('/createDevice')
     async createDevice(@Body() body: CreateLightDto): Promise<YandexLights> {
-        return this.yandexService.create(body as Partial<YandexLights>);
+        return this.yandexService.createDevices(body as Partial<YandexLights>);
     }
 
     @Patch('/updateDevice/:id')
@@ -84,7 +86,7 @@ export class YandexController {
         @Body() body: UpdateActiveDto,
     ): Promise<{ id: string; active: boolean }> {
         const { active } = body;
-        await this.yandexService.updateZone(id, active);
+        await this.yandexService.updateDevice(id, active);
         return { id, active };
     }
 }

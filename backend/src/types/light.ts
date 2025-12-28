@@ -12,4 +12,8 @@ interface Lights {
     temperature_k?: number,
 }
 
-export {Light, Lights}
+interface Scenarios {
+    scenarios_id: string
+}
+
+export {Light, Lights, Scenarios}

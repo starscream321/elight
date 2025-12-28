@@ -5,19 +5,20 @@ import MainBtn from "./MainBtn.vue";
 
 import ColorRing from "./ColorRing.vue";
 import type {EffectFromApi, EffectFrontend} from "../types/rgb.ts";
-import {getEffects, sendEffect} from "../api/effects.ts";
+import {getEffects, sendEffect, setBrightness, setColor} from "../api/effects.ts";
 import { iconMapEffects } from "../icon/icons.ts";
 
 
 
 const effects = shallowRef<EffectFrontend[]>([])
 const brightness = ref(0)
-const color = ref('')
+const color = ref(0)
 
 const getBrightnessFromLocalStorage = () => {
   const storageBrightness = localStorage.getItem('rgb_brightness')
   brightness.value = storageBrightness ? JSON.parse(storageBrightness) * 100 : 0;
 }
+
 
 const normalizeBrightness = (brightness: number) => brightness / 100
 
@@ -37,16 +38,18 @@ const handleControl = async (id: number, effect: string, brightness: number, col
   await fetchEffects()
 }
 
+
 onMounted(async () => {
   getBrightnessFromLocalStorage()
   await fetchEffects()
 })
 
-watch([color, brightness], async ([newColor, newBrightness]) => {
-  const activeEffect = effects.value.find(e => e.active)
-  if (activeEffect) {
-    await handleControl(activeEffect.id, activeEffect.name, normalizeBrightness(newBrightness), newColor)
-  }
+watch( brightness, async (newBrightness) => {
+  await setBrightness(newBrightness)
+})
+
+watch(color, async (newColor) => {
+  await setColor(newColor)
 })
 
 

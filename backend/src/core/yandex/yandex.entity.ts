@@ -23,3 +23,13 @@ export class YandexLights {
     @Column({ default: false })
     active: boolean;
 }
+
+@Entity()
+export class YandexScenarios {
+    @PrimaryColumn('uuid')
+    id: string;
+    @Column()
+    name: string;
+    @Column()
+    icon: string;
+}
