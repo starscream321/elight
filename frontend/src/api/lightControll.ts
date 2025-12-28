@@ -4,7 +4,7 @@ import type {ZoneFromApi} from "../types/zone.ts";
 import type {ScenariosFromApi} from "../types/scenarios.ts";
 
 const axiosInstance = axios.create({
-    baseURL: 'http://localhost:3000/yandex'
+    baseURL: 'http://192.168.11.78:3000/yandex'
 })
 
 export const saveBrightness = (brightness: number) => {

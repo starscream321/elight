@@ -1,293 +1,359 @@
-import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import {
+    Injectable,
+    InternalServerErrorException,
+    NotFoundException,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+
 import { hsvToRgb } from '../utils/color.utils';
 import { getAudioSpectrum } from '../utils/audio.utils';
 import { Effect } from './effects.entity';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 
 @Injectable()
 export class EffectsService {
     constructor(
         @InjectRepository(Effect)
-        private effectRepo: Repository<Effect>,
+        private readonly effectRepository: Repository<Effect>,
     ) {}
-
-    private beatFlash = 0;
-    private prevKick = 0;
 
     private readonly MAX_BRIGHTNESS = 0.8;
 
-    private normalizeBrightness(
+    private readonly TIME_INPUT: 'ms' | 'frames' = 'ms';
+
+    private readonly SPEED_RAINBOW = 0.25;
+    private readonly SPEED_COMET = 0.12;
+    private readonly SPEED_AURORA = 0.4;
+    private readonly SPEED_MUSIC = 0.35;
+    private readonly SPEED_SMOOTH_FADE = 1.0;
+
+    private beatFlash = 0;
+    private previousKick = 0;
+
+    private lastMusicTimeSec: number | null = null;
+
+    private phaseKick = 0;
+    private phaseBass = 0;
+    private phaseMid = 0;
+    private phaseTreble = 0;
+
+    private smoothKick = 0;
+    private smoothBass = 0;
+    private smoothMid = 0;
+    private smoothTreble = 0;
+    private smoothEnergy = 0;
+
+    private clampBrightness(
         brightness: number | undefined | null,
-        min = 0
+        minBrightness = 0,
     ): number {
-        if (brightness === undefined || brightness === null) {
-            brightness = this.MAX_BRIGHTNESS * 0.5;
-        }
-
-        if (brightness <= 0) return 0;
-        
-        let br = brightness;
-
-        br = Math.min(br, this.MAX_BRIGHTNESS);
-
-        return Math.max(min, br);
+        const base = brightness ?? this.MAX_BRIGHTNESS * 0.5;
+        if (base <= 0) return 0;
+        return Math.max(minBrightness, Math.min(base, this.MAX_BRIGHTNESS));
     }
 
+    private getTimeBase(timeInput: number): number {
+        return this.TIME_INPUT === 'ms' ? timeInput / 1000 : timeInput;
+    }
 
-    // ------------------------------------------------------------
-    //  STATIC COLOR (исправлено — яркость работает правильно)
-    // ------------------------------------------------------------
+    private fillAll(buffer: Uint8Array, g: number, r: number, b: number) {
+        for (let i = 0; i < buffer.length; i += 3) {
+            buffer[i] = g;
+            buffer[i + 1] = r;
+            buffer[i + 2] = b;
+        }
+    }
+
+    private clamp(value: number, min: number, max: number) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private smoothAR(
+        current: number,
+        target: number,
+        attackPerSec: number,
+        releasePerSec: number,
+        dt: number,
+    ) {
+        const rate = target > current ? attackPerSec : releasePerSec;
+        const k = 1 - Math.exp(-rate * dt);
+        return current + (target - current) * k;
+    }
+
     async staticColor(
-        length: number,
-        offset: number,
-        brightness: number = 1,
-        hue: number = 240
+        ledCount: number,
+        timeInput: number,
+        brightness = 1,
+        hue = 240,
     ): Promise<Uint8Array> {
+        const pixels = new Uint8Array(ledCount * 3);
+        const safeBrightness = this.clampBrightness(brightness);
+        if (safeBrightness === 0) return pixels;
 
-        const out = new Uint8Array(length * 3);
-        const br = this.normalizeBrightness(brightness);
+        const [g0, r0, b0] = hsvToRgb(hue % 360, 1, 1);
+        this.fillAll(
+            pixels,
+            Math.round(g0 * safeBrightness),
+            Math.round(r0 * safeBrightness),
+            Math.round(b0 * safeBrightness),
+        );
 
-        if (br === 0) return out;
-
-        let [g, r, b] = hsvToRgb(hue % 360, 1, 1);
-
-        g = Math.round(g * br);
-        r = Math.round(r * br);
-        b = Math.round(b * br);
-
-        for (let i = 0; i < length; i++) {
-            const j = i * 3;
-            out[j] = g;
-            out[j + 1] = r;
-            out[j + 2] = b;
-        }
-
-        return out;
+        return pixels;
     }
 
-    // ------------------------------------------------------------
-    //  RAINBOW — динамика может работать плохо без min brightness
-    // ------------------------------------------------------------
-    async rainbow(length: number, offset: number, brightness: number): Promise<Uint8Array> {
-        const out = new Uint8Array(length * 3);
-        const br = this.normalizeBrightness(brightness, 0.1); // мягкий минимум
+    async rainbow(
+        ledCount: number,
+        timeInput: number,
+        brightness: number,
+    ): Promise<Uint8Array> {
+        const pixels = new Uint8Array(ledCount * 3);
+        const safeBrightness = this.clampBrightness(brightness, 0.1);
+        if (safeBrightness === 0) return pixels;
 
+        const time = this.getTimeBase(timeInput) * this.SPEED_RAINBOW * 60;
         const cycles = 6;
-        const speed = offset * 0.6;
 
-        for (let i = 0; i < length; i++) {
-            const hue = ((i / length) * 360 * cycles + speed) % 360;
-            const [g, r, b] = hsvToRgb(hue, 1, br);
+        for (let i = 0; i < ledCount; i++) {
+            const hue = ((i / ledCount) * 360 * cycles + time * 10) % 360;
+            const [g, r, b] = hsvToRgb(hue, 1, safeBrightness);
 
             const j = i * 3;
-            out[j] = g;
-            out[j + 1] = r;
-            out[j + 2] = b;
+            pixels[j] = g;
+            pixels[j + 1] = r;
+            pixels[j + 2] = b;
         }
 
-        return out;
+        return pixels;
     }
 
-    // ------------------------------------------------------------
-    //  SMOOTH FADE
-    // ------------------------------------------------------------
-    async smoothFade(length: number, offset: number, brightness: number, hueColor: number): Promise<Uint8Array> {
-        const br = this.normalizeBrightness(brightness);
-        const out = new Uint8Array(length * 3);
+    async smoothFade(
+        ledCount: number,
+        timeInput: number,
+        brightness: number,
+        hue = 0,
+    ): Promise<Uint8Array> {
+        const pixels = new Uint8Array(ledCount * 3);
+        const safeBrightness = this.clampBrightness(brightness);
+        if (safeBrightness === 0) return pixels;
 
-        if (br === 0) return out;
+        const time = this.getTimeBase(timeInput) * this.SPEED_SMOOTH_FADE;
+        const fadeLength = 3.4;
+        const phase = (time % fadeLength) / fadeLength;
+        const fade = phase < 0.5 ? phase * 2 : 1 - (phase - 0.5) * 2;
 
-        const fadeDuration = 170;
-        const half = fadeDuration / 2;
-        const t = offset % fadeDuration;
+        const [g0, r0, b0] = hsvToRgb(hue, 1, 1);
 
-        const [r0, g0, b0] = hsvToRgb(hueColor, 1, 1);
-        const calc = (v: number) =>
-            t < half ? (v * t) / half : v * (1 - (t - half) / half);
+        this.fillAll(
+            pixels,
+            g0 * fade * safeBrightness,
+            r0 * fade * safeBrightness,
+            b0 * fade * safeBrightness,
+        );
 
-        const r = calc(r0) * br;
-        const g = calc(g0) * br;
-        const b = calc(b0) * br;
-
-        let j = 0;
-        for (let i = 0; i < length; i += 4) {
-            out[j++] = g; out[j++] = r; out[j++] = b;
-            out[j++] = g; out[j++] = r; out[j++] = b;
-            out[j++] = g; out[j++] = r; out[j++] = b;
-            out[j++] = g; out[j++] = r; out[j++] = b;
-        }
-        return out;
+        return pixels;
     }
 
-    // ------------------------------------------------------------
-    //  MUSIC EFFECT (улучшенная версия)
-    // ------------------------------------------------------------
-    async music(length: number, offset: number, brightness: number, hueColor = 0): Promise<Uint8Array> {
-        const s = getAudioSpectrum();
-        const out = new Uint8Array(length * 3);
+    async music(
+        ledCount: number,
+        timeInput: number,
+        brightness: number,
+        hueBase = 0,
+    ): Promise<Uint8Array> {
+        const pixels = new Uint8Array(ledCount * 3);
+        const safeBrightness = this.clampBrightness(brightness, 0.08);
+        if (safeBrightness === 0) return pixels;
 
-        const br = this.normalizeBrightness(brightness, 0.08);
-        if (br === 0) return out;
+        const spectrum = getAudioSpectrum();
 
-        // Kick isolation
-        const kickIso = s.kick / (s.bass * 0.6 + s.mid * 0.3 + 0.3);
+        const nowSec = this.getTimeBase(timeInput) * this.SPEED_MUSIC;
+        const dt =
+            this.lastMusicTimeSec === null ? 1 / 60 : nowSec - this.lastMusicTimeSec;
+        this.lastMusicTimeSec = nowSec;
 
-        const kick   = Math.pow(s.kick, 0.85) * 6.2 * (1 + kickIso * 0.4);
-        const bass   = Math.pow(s.bass, 0.70) * 4.8;
-        const mid    = Math.pow(s.mid,  0.65) * 4.2;
-        const treble = Math.pow(s.treble, 0.60) * 3.0;
+        const safeDt = this.clamp(dt, 0, 0.05);
 
-        const energyBoost = 1 + s.energy * 0.55;
+        this.smoothKick = this.smoothAR(
+            this.smoothKick,
+            spectrum.kick,
+            22,
+            10,
+            safeDt,
+        );
+        this.smoothBass = this.smoothAR(
+            this.smoothBass,
+            spectrum.bass,
+            18,
+            9,
+            safeDt,
+        );
+        this.smoothMid = this.smoothAR(this.smoothMid, spectrum.mid, 16, 8, safeDt);
+        this.smoothTreble = this.smoothAR(
+            this.smoothTreble,
+            spectrum.treble,
+            14,
+            7,
+            safeDt,
+        );
+        this.smoothEnergy = this.smoothAR(
+            this.smoothEnergy,
+            spectrum.energy,
+            8,
+            4,
+            safeDt,
+        );
 
-        const transient = Math.max(0, s.kick - this.prevKick);
-        this.prevKick = s.kick;
+        const kickIsolation =
+            this.smoothKick / (this.smoothBass * 0.6 + this.smoothMid * 0.3 + 0.3);
+
+        const kickAmp =
+            Math.pow(this.smoothKick, 0.85) * 5.6 * (1 + kickIsolation * 0.35);
+        const bassAmp = Math.pow(this.smoothBass, 0.7) * 4.2;
+        const midAmp = Math.pow(this.smoothMid, 0.65) * 3.8;
+        const trebleAmp = Math.pow(this.smoothTreble, 0.6) * 2.8;
+
+        const kickDelta = Math.max(0, this.smoothKick - this.previousKick);
+        this.previousKick = this.smoothKick;
 
         const transientPunch =
-            (transient ** 0.7) * 12 * (1 + kickIso * 0.4);
+            Math.pow(kickDelta, 0.75) * 6.5 * (1 + kickIsolation * 0.3);
 
-        if (s.beat) this.beatFlash = 1.0;
-        this.beatFlash *= 0.92;
+        if (spectrum.beat) this.beatFlash = 1;
+        this.beatFlash = this.smoothAR(this.beatFlash, 0, 12, 12, safeDt);
 
-        const beatBoost = 1 + this.beatFlash * 0.9;
+        const energyBoost = 1 + this.smoothEnergy * 0.45;
+        const beatBoost = 1 + this.beatFlash * 0.75;
 
-        const hueKickShift = transientPunch * 45 + this.beatFlash * 25;
+        const speedKick = 2.2 + this.smoothEnergy * 1.0;
+        const speedBass = 1.6 + this.smoothEnergy * 0.8;
+        const speedMid = 1.1 + this.smoothEnergy * 0.7;
+        const speedTreble = 0.8 + this.smoothEnergy * 0.6;
 
-        let j = 0;
+        this.phaseKick += safeDt * speedKick;
+        this.phaseBass += safeDt * speedBass;
+        this.phaseMid += safeDt * speedMid;
+        this.phaseTreble += safeDt * speedTreble;
 
-        const oKick = offset * 3.0;
-        const oBass = offset * 2.0;
-        const oMid  = offset * 1.4;
+        const hueBeatShift = this.beatFlash * 22 + transientPunch * 18;
 
-        const waveKick = (i: number) =>
-            Math.sin((i + oKick) * 0.040) * kick;
+        const softClip = (x: number) => x / (1 + Math.abs(x) * 1.15);
 
-        const waveMix = (i: number) =>
-            bass   * Math.sin((i + oBass) * 0.052) +
-            mid    * Math.sin((i + oMid)  * 0.090) +
-            treble * Math.sin(i * 0.13);
+        for (let i = 0; i < ledCount; i++) {
+            const kickWave = Math.sin(i * 0.04 + this.phaseKick * 6.2) * kickAmp;
+            const bassWave = Math.sin(i * 0.052 + this.phaseBass * 4.8) * bassAmp;
+            const midWave = Math.sin(i * 0.09 + this.phaseMid * 4.1) * midAmp;
+            const trebleWave =
+                Math.sin(i * 0.13 + this.phaseTreble * 3.2) * trebleAmp;
 
-        const softComp = (v: number) => v / (1 + v * 1.1);
+            let value =
+                (kickWave + bassWave + midWave + trebleWave + transientPunch) *
+                safeBrightness *
+                energyBoost *
+                beatBoost;
 
-        for (let i = 0; i < length; i += 4) {
-            const ids = [i, i + 1, i + 2, i + 3];
+            value = softClip(value);
+            value = this.clamp(value, 0, 1);
 
-            for (const idx of ids) {
-                let v =
-                    (waveKick(idx) + waveMix(idx) + transientPunch) *
-                    br * energyBoost * beatBoost;
-
-                v = Math.max(0, Math.min(1, v));
-                v = softComp(v);
-
-                const hue = (hueColor + idx * 0.38 + hueKickShift) % 360;
-                const c = hsvToRgb(hue, 1, v);
-
-                out[j++] = c[0];
-                out[j++] = c[1];
-                out[j++] = c[2];
-            }
-        }
-
-        return out;
-    }
-
-    // ------------------------------------------------------------
-    //  COMET
-    // ------------------------------------------------------------
-    async comet(length: number, offset: number, brightness: number): Promise<Uint8Array> {
-        const out = new Uint8Array(length * 3);
-        const br = this.normalizeBrightness(brightness);
-
-        if (br === 0) return out;
-
-        const head = offset % length;
-        const tail = Math.max(3, Math.floor(length * 0.025));
-
-        for (let i = 0; i < length; i++) {
-            const d = (head - i + length) % length;
-            if (d > tail) continue;
-
-            const fade = 1 - d / tail;
-            const v = fade * br;
-
-            const hue = (offset * 2 + i * 0.2) % 360;
-            const [g, r, b] = hsvToRgb(hue, 1, v);
+            const hue = (hueBase + i * 0.38 + hueBeatShift) % 360;
+            const [g, r, b] = hsvToRgb(hue, 1, value);
 
             const j = i * 3;
-            out[j] = g;
-            out[j + 1] = r;
-            out[j + 2] = b;
+            pixels[j] = g;
+            pixels[j + 1] = r;
+            pixels[j + 2] = b;
         }
 
-        return out;
+        return pixels;
     }
 
-    // ------------------------------------------------------------
-    //  AURORA
-    // ------------------------------------------------------------
-    async aurora(length: number, offset: number, brightness: number): Promise<Uint8Array> {
-        const out = new Uint8Array(length * 3);
-        const br = this.normalizeBrightness(brightness, 0.15);
+    async comet(
+        ledCount: number,
+        timeInput: number,
+        brightness: number,
+    ): Promise<Uint8Array> {
+        const pixels = new Uint8Array(ledCount * 3);
+        const safeBrightness = this.clampBrightness(brightness);
+        if (safeBrightness === 0) return pixels;
 
-        if (br === 0) return out;
+        const time = this.getTimeBase(timeInput) * this.SPEED_COMET;
+        const head = Math.floor(time * 30) % ledCount;
+        const tailLength = Math.max(3, Math.floor(ledCount * 0.025));
 
-        const t = offset * 0.003;
+        for (let i = 0; i < ledCount; i++) {
+            const distance = (head - i + ledCount) % ledCount;
+            if (distance > tailLength) continue;
 
-        const hueStart = 150;
-        const hueEnd   = 290;
+            const fade = 1 - distance / tailLength;
+            const value = fade * safeBrightness;
 
-        for (let i = 0; i < length; i++) {
-            const x = i / length;
-
-            const w1 = Math.sin(x * 3.0 + t * 1.3);
-            const w2 = Math.sin(x * 5.5 + t * 0.9);
-            const w3 = Math.sin(x * 1.6 + t * 2.2);
-
-            const mix = (w1 * 0.55 + w2 * 0.35 + w3 * 0.10) * 0.5 + 0.5;
-
-            let v = br * (0.22 + 0.78 * mix);
-
-            const hue = hueStart + (hueEnd - hueStart) * mix;
-
-            const sparkSeed = Math.sin(i * 12.345 + offset * 0.12);
-            if (sparkSeed > 0.92) {
-                const sparkAmp = (sparkSeed - 0.92) * 12.5;
-                v += sparkAmp * br * 0.6;
-            }
-
-            v = Math.min(v, 1);
-
-            const c = hsvToRgb(hue % 360, 1, v);
+            const hue = (time * 120 + i * 0.2) % 360;
+            const [g, r, b] = hsvToRgb(hue, 1, value);
 
             const j = i * 3;
-            out[j] = c[0];
-            out[j + 1] = c[1];
-            out[j + 2] = c[2];
+            pixels[j] = g;
+            pixels[j + 1] = r;
+            pixels[j + 2] = b;
         }
 
-        return out;
+        return pixels;
     }
 
-    // ------------------------------------------------------------
-    //  EFFECTS MAP
-    // ------------------------------------------------------------
+    async aurora(
+        ledCount: number,
+        timeInput: number,
+        brightness: number,
+    ): Promise<Uint8Array> {
+        const pixels = new Uint8Array(ledCount * 3);
+        const safeBrightness = this.clampBrightness(brightness, 0.15);
+        if (safeBrightness === 0) return pixels;
+
+        const time = this.getTimeBase(timeInput) * this.SPEED_AURORA;
+
+        for (let i = 0; i < ledCount; i++) {
+            const x = i / ledCount;
+
+            const w1 = Math.sin(x * 3.0 + time * 1.3);
+            const w2 = Math.sin(x * 5.5 + time * 0.9);
+            const w3 = Math.sin(x * 1.6 + time * 2.2);
+
+            const mix = (w1 * 0.55 + w2 * 0.35 + w3 * 0.1) * 0.5 + 0.5;
+
+            let value = safeBrightness * (0.22 + 0.78 * mix);
+
+            const spark = Math.sin(i * 12.345 + time * 10);
+            if (spark > 0.92) value += (spark - 0.92) * safeBrightness * 0.6;
+
+            value = Math.min(1, value);
+
+            const hue = (150 + 140 * mix) % 360;
+            const [g, r, b] = hsvToRgb(hue, 1, value);
+
+            const j = i * 3;
+            pixels[j] = g;
+            pixels[j + 1] = r;
+            pixels[j + 2] = b;
+        }
+
+        return pixels;
+    }
+
     getEffectByName(effectName: string) {
-        const map = {
-            rainbow: (l: number, o = 0, b: number) => this.rainbow(l, o, b),
-            music: (l: number, o = 0, b: number, h = 0) => this.music(l, o, b, h),
-            smoothFade: (l: number, o = 0, b: number, h = 0) => this.smoothFade(l, o, b, h),
-            comet: (l: number, o = 0, b: number) => this.comet(l, o, b),
-            aurora: (l: number, o = 0, b: number) => this.aurora(l, o, b),
-            staticColor: (l: number, o = 0, b: number, h: number) =>
-                this.staticColor(l, o, b, h),
+        const effects = {
+            rainbow: (l: number, t = 0, b: number) => this.rainbow(l, t, b),
+            music: (l: number, t = 0, b: number, h = 0) => this.music(l, t, b, h),
+            smoothFade: (l: number, t = 0, b: number, h = 0) =>
+                this.smoothFade(l, t, b, h),
+            comet: (l: number, t = 0, b: number) => this.comet(l, t, b),
+            aurora: (l: number, t = 0, b: number) => this.aurora(l, t, b),
+            staticColor: (l: number, t = 0, b: number, h: number) =>
+                this.staticColor(l, t, b, h),
         };
-        return (map as any)[effectName];
+
+        return (effects as any)[effectName];
     }
 
     async findAll() {
         try {
-            return await this.effectRepo.find();
+            return await this.effectRepository.find();
         } catch (e) {
             throw new InternalServerErrorException(e, 'Effects not found');
         }
@@ -295,14 +361,15 @@ export class EffectsService {
 
     async updateEffectStatus(id: number, active: boolean) {
         if (active) {
-            await this.effectRepo
+            await this.effectRepository
                 .createQueryBuilder()
                 .update()
                 .set({ active: false })
                 .where('id != :id', { id })
                 .execute();
         }
-        const result = await this.effectRepo.update(id, { active });
+
+        const result = await this.effectRepository.update(id, { active });
         if (result.affected === 0) {
             throw new NotFoundException(`Effect with id ${id} not found`);
         }

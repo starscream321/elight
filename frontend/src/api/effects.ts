@@ -2,10 +2,9 @@ import axios from "axios";
 import type {EffectFromApi} from "../types/rgb.ts";
 
 const axiosInstance = axios.create({
-    baseURL: 'http://localhost:3000/effects',
+    baseURL: 'http://192.168.11.78:3000/effects',
     headers: {
         'Content-Type': 'application/json',
-        'x-api-key': API_KEY
     }
 })
 
