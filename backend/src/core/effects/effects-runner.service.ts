@@ -24,8 +24,9 @@ export class EffectsRunnerService {
         private readonly artnetService: ArtnetService,
     ) {}
 
-    private offset = 0;
+    private startTime = 0;
     private ticker?: NodeJS.Timeout;
+    private isRunning = false;
 
     private currentEffect?: EffectFn;
     private currentBrightness = 1;
@@ -54,20 +55,23 @@ export class EffectsRunnerService {
         if (!effect) return false;
 
         this.stop();
+        this.effectsService.resetState();
 
         this.currentEffect = effect;
         this.currentBrightness = brightness;
         this.currentHue = hueColor;
+        this.startTime = Date.now();
+        this.isRunning = true;
 
         const loop = async () => {
-            if (!this.currentEffect) return;
+            if (!this.isRunning || !this.currentEffect) return;
 
             try {
-                this.offset++;
+                const elapsedTime = Date.now() - this.startTime;
 
                 const frameFull = await this.currentEffect(
                     TOTAL_DIODES,
-                    this.offset,
+                    elapsedTime,
                     this.currentBrightness,
                     this.currentHue
                 );
@@ -84,21 +88,28 @@ export class EffectsRunnerService {
                     await this.artnetService.sendPacket(target, u, IP_ADDRESS);
                 }
 
-                this.ticker = setTimeout(loop, 0);
+                if (this.isRunning) {
+                    this.ticker = setImmediate(loop);
+                }
             } catch (error) {
                 this.logger.error('Error in effects loop', (error as Error).stack);
-                this.ticker = setTimeout(loop, 100);
+                if (this.isRunning) {
+                    this.ticker = setTimeout(loop, 100);
+                }
             }
         };
 
-        this.ticker = setTimeout(loop, 0);
+        this.ticker = setImmediate(loop);
         return true;
     }
 
     public stop() {
+        this.isRunning = false;
         if (this.ticker) {
             clearTimeout(this.ticker);
+            clearImmediate(this.ticker);
             this.ticker = undefined;
         }
+        this.currentEffect = undefined;
     }
 }
