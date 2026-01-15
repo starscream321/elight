@@ -24,7 +24,7 @@ export class EffectsRunnerService {
         private readonly artnetService: ArtnetService,
     ) {}
 
-    private offset = 0;
+    private startTime = 0;
     private ticker?: NodeJS.Timeout;
     private isRunning = false;
 
@@ -60,18 +60,18 @@ export class EffectsRunnerService {
         this.currentEffect = effect;
         this.currentBrightness = brightness;
         this.currentHue = hueColor;
-        this.offset = 0;
+        this.startTime = Date.now();
         this.isRunning = true;
 
         const loop = async () => {
             if (!this.isRunning || !this.currentEffect) return;
 
             try {
-                this.offset = (this.offset + 1) % Number.MAX_SAFE_INTEGER;
+                const elapsedTime = Date.now() - this.startTime;
 
                 const frameFull = await this.currentEffect(
                     TOTAL_DIODES,
-                    this.offset,
+                    elapsedTime,
                     this.currentBrightness,
                     this.currentHue
                 );

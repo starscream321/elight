@@ -94,6 +94,10 @@ export class EffectsService {
         return Math.max(min, Math.min(max, value));
     }
 
+    private softClip(x: number): number {
+        return x / (1 + Math.abs(x) * 1.15);
+    }
+
     private smoothAR(
         current: number,
         target: number,
@@ -261,22 +265,24 @@ export class EffectsService {
 
         const hueBeatShift = this.beatFlash * 22 + transientPunch * 18;
 
-        const softClip = (x: number) => x / (1 + Math.abs(x) * 1.15);
+        // Pre-calculate constant values outside the loop
+        const phaseKickOffset = this.phaseKick * 6.2;
+        const phaseBassOffset = this.phaseBass * 4.8;
+        const phaseMidOffset = this.phaseMid * 4.1;
+        const phaseTrebleOffset = this.phaseTreble * 3.2;
+        const brightnessMultiplier = safeBrightness * energyBoost * beatBoost;
 
         for (let i = 0; i < ledCount; i++) {
-            const kickWave = Math.sin(i * 0.04 + this.phaseKick * 6.2) * kickAmp;
-            const bassWave = Math.sin(i * 0.052 + this.phaseBass * 4.8) * bassAmp;
-            const midWave = Math.sin(i * 0.09 + this.phaseMid * 4.1) * midAmp;
-            const trebleWave =
-                Math.sin(i * 0.13 + this.phaseTreble * 3.2) * trebleAmp;
+            const kickWave = Math.sin(i * 0.04 + phaseKickOffset) * kickAmp;
+            const bassWave = Math.sin(i * 0.052 + phaseBassOffset) * bassAmp;
+            const midWave = Math.sin(i * 0.09 + phaseMidOffset) * midAmp;
+            const trebleWave = Math.sin(i * 0.13 + phaseTrebleOffset) * trebleAmp;
 
             let value =
                 (kickWave + bassWave + midWave + trebleWave + transientPunch) *
-                safeBrightness *
-                energyBoost *
-                beatBoost;
+                brightnessMultiplier;
 
-            value = softClip(value);
+            value = this.softClip(value);
             value = this.clamp(value, 0, 1);
 
             const hue = (hueBase + i * 0.38 + hueBeatShift) % 360;
