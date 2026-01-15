@@ -1,9 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { EffectsService } from './effects.service';
 import { ArtnetService } from '../artnet/artnet.service';
 
-const IP_ADDRESS = '192.168.6.11';
-const TOTAL_DIODES = 5000;
+const IP_ADDRESS = process.env.ARTNET_IP || '192.168.6.11';
+const TOTAL_DIODES = parseInt(process.env.TOTAL_DIODES || '5000', 10);
 const CHANNELS_PER_PIXEL = 3;
 const MAX_PIXELS_PER_UNIVERSE = Math.floor(512 / CHANNELS_PER_PIXEL);
 const totalUniverses = Math.ceil(TOTAL_DIODES / MAX_PIXELS_PER_UNIVERSE);
@@ -17,6 +17,8 @@ type EffectFn = (
 
 @Injectable()
 export class EffectsRunnerService {
+    private readonly logger = new Logger(EffectsRunnerService.name);
+
     constructor(
         private readonly effectsService: EffectsService,
         private readonly artnetService: ArtnetService,
@@ -60,28 +62,33 @@ export class EffectsRunnerService {
         const loop = async () => {
             if (!this.currentEffect) return;
 
-            this.offset++;
+            try {
+                this.offset++;
 
-            const frameFull = await this.currentEffect(
-                TOTAL_DIODES,
-                this.offset,
-                this.currentBrightness,
-                this.currentHue
-            );
+                const frameFull = await this.currentEffect(
+                    TOTAL_DIODES,
+                    this.offset,
+                    this.currentBrightness,
+                    this.currentHue
+                );
 
-            this.fullFrame.set(frameFull);
+                this.fullFrame.set(frameFull);
 
-            for (let u = 0; u < totalUniverses; u++) {
-                const start = u * MAX_PIXELS_PER_UNIVERSE * 3;
-                const end = start + MAX_PIXELS_PER_UNIVERSE * 3;
+                for (let u = 0; u < totalUniverses; u++) {
+                    const start = u * MAX_PIXELS_PER_UNIVERSE * 3;
+                    const end = start + MAX_PIXELS_PER_UNIVERSE * 3;
 
-                const target = this.universeBuffers[u];
-                target.set(this.fullFrame.subarray(start, end));
+                    const target = this.universeBuffers[u];
+                    target.set(this.fullFrame.subarray(start, end));
 
-                await this.artnetService.sendPacket(target, u, IP_ADDRESS);
+                    await this.artnetService.sendPacket(target, u, IP_ADDRESS);
+                }
+
+                this.ticker = setTimeout(loop, 0);
+            } catch (error) {
+                this.logger.error('Error in effects loop', (error as Error).stack);
+                this.ticker = setTimeout(loop, 100);
             }
-
-            this.ticker = setTimeout(loop, 0);
         };
 
         this.ticker = setTimeout(loop, 0);

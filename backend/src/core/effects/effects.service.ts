@@ -10,6 +10,17 @@ import { hsvToRgb } from '../utils/color.utils';
 import { getAudioSpectrum } from '../utils/audio.utils';
 import { Effect } from './effects.entity';
 
+type EffectFunction = (
+    ledCount: number,
+    timeInput: number,
+    brightness: number,
+    hue?: number,
+) => Promise<Uint8Array>;
+
+type EffectMap = {
+    [key: string]: EffectFunction;
+};
+
 @Injectable()
 export class EffectsService {
     constructor(
@@ -336,19 +347,19 @@ export class EffectsService {
         return pixels;
     }
 
-    getEffectByName(effectName: string) {
-        const effects = {
+    getEffectByName(effectName: string): EffectFunction | undefined {
+        const effects: EffectMap = {
             rainbow: (l: number, t = 0, b: number) => this.rainbow(l, t, b),
             music: (l: number, t = 0, b: number, h = 0) => this.music(l, t, b, h),
             smoothFade: (l: number, t = 0, b: number, h = 0) =>
                 this.smoothFade(l, t, b, h),
             comet: (l: number, t = 0, b: number) => this.comet(l, t, b),
             aurora: (l: number, t = 0, b: number) => this.aurora(l, t, b),
-            staticColor: (l: number, t = 0, b: number, h: number) =>
+            staticColor: (l: number, t = 0, b: number, h = 0) =>
                 this.staticColor(l, t, b, h),
         };
 
-        return (effects as any)[effectName];
+        return effects[effectName];
     }
 
     async findAll() {
