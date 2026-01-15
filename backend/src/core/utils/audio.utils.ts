@@ -1,5 +1,5 @@
-const mic = require("mic");
-const FFT = require("fft-js").fft;
+import * as mic from "mic";
+import { fft as FFT } from "fft-js";
 
 const SAMPLE_RATE = 44100;
 const FFT_SIZE = 1024;
@@ -56,7 +56,7 @@ export const micInstance = mic({
     device: DEVICE,
 });
 
-const stream: any = micInstance.getAudioStream();
+const stream = micInstance.getAudioStream();
 
 function parseChunk(buf: Buffer) {
     if (buf.length % 2 === 0)
@@ -156,7 +156,7 @@ export function getAudioSpectrum(): AudioFeatures {
     const xw = audioMono.map((v, i) => v * WIN[i]);
     const X = FFT(xw);
 
-    const mags = X.slice(0, FFT_SIZE / 2).map(([re, im]: any) => Math.hypot(re, im));
+    const mags = X.slice(0, FFT_SIZE / 2).map(([re, im]: [number, number]) => Math.hypot(re, im));
 
     const bin = SAMPLE_RATE / FFT_SIZE;
     const idx = (hz: number) => Math.min(mags.length - 1, Math.round(hz / bin));

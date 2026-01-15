@@ -167,14 +167,9 @@ export class YandexService {
             throw new BadRequestException('Не передано ни одного действия');
         }
 
-        try {
-            await this.sendApi({targetType:'devices', id: id, actions: actions});
-            if (on !== undefined) {
-                await this.updateDevice(id, on);
-            }
-        } catch (e) {
-
-            throw e;
+        await this.sendApi({targetType:'devices', id: id, actions: actions});
+        if (on !== undefined) {
+            await this.updateDevice(id, on);
         }
     }
 
@@ -203,11 +198,7 @@ export class YandexService {
     async controlScenarios(
         scenarios_id: string,
     ): Promise<void> {
-        console.log(scenarios_id);
-        try {
-            await this.sendApi({targetType:'scenarios', scenarios_id: scenarios_id});
-        } catch (e) {
-            throw e;
-        }
+        this.logger.log(`Запуск сценария ${scenarios_id}`);
+        await this.sendApi({targetType:'scenarios', scenarios_id: scenarios_id});
     }
 }
