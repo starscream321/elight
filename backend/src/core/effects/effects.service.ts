@@ -54,6 +54,21 @@ export class EffectsService {
     private smoothTreble = 0;
     private smoothEnergy = 0;
 
+    public resetState(): void {
+        this.beatFlash = 0;
+        this.previousKick = 0;
+        this.lastMusicTimeSec = null;
+        this.phaseKick = 0;
+        this.phaseBass = 0;
+        this.phaseMid = 0;
+        this.phaseTreble = 0;
+        this.smoothKick = 0;
+        this.smoothBass = 0;
+        this.smoothMid = 0;
+        this.smoothTreble = 0;
+        this.smoothEnergy = 0;
+    }
+
     private clampBrightness(
         brightness: number | undefined | null,
         minBrightness = 0,
@@ -156,9 +171,9 @@ export class EffectsService {
 
         this.fillAll(
             pixels,
-            g0 * fade * safeBrightness,
-            r0 * fade * safeBrightness,
-            b0 * fade * safeBrightness,
+            Math.round(g0 * fade * safeBrightness),
+            Math.round(r0 * fade * safeBrightness),
+            Math.round(b0 * fade * safeBrightness),
         );
 
         return pixels;
