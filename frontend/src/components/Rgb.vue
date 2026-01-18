@@ -44,8 +44,8 @@ onMounted(async () => {
   await fetchEffects()
 })
 
-watch( brightness, async (newBrightness) => {
-  await setBrightness(newBrightness)
+watch(brightness, async (newBrightness) => {
+  await setBrightness(normalizeBrightness(newBrightness))
 })
 
 watch(color, async (newColor) => {

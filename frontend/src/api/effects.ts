@@ -1,8 +1,10 @@
 import axios from "axios";
 import type {EffectFromApi} from "../types/rgb.ts";
 
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? 'http://192.168.11.78:3000'
+
 const axiosInstance = axios.create({
-    baseURL: 'http://192.168.11.78:3000/effects',
+    baseURL: `${apiBaseUrl}/effects`,
     headers: {
         'Content-Type': 'application/json',
     }
@@ -12,7 +14,7 @@ const saveBrightness = (brightness: number) => {
     localStorage.setItem('rgb_brightness', JSON.stringify(brightness))
 }
 
-export const sendEffect = async (id: number, effect: string, brightness: number, active?: boolean, color?: string) => {
+export const sendEffect = async (id: number, effect: string, brightness: number, active?: boolean, hueColor?: number) => {
 
     saveBrightness(brightness)
     const newActive = !active
@@ -20,7 +22,7 @@ export const sendEffect = async (id: number, effect: string, brightness: number,
     const res = await axiosInstance.post('/start', {
         id,
         effect,
-        color,
+        hueColor,
         active: newActive,
         brightness
     })
