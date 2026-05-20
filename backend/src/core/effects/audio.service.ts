@@ -43,7 +43,7 @@ export class AudioService implements OnModuleDestroy {
   private audioSamplesSeen = 0;
   private started = false;
   private audioProcess?: ChildProcessWithoutNullStreams;
-  private readonly audioChannels = this.getAudioChannels();
+  private readonly audioChannels: number;
 
   private smoothed = {
     kick: 0,
@@ -63,7 +63,9 @@ export class AudioService implements OnModuleDestroy {
   private kickFast = 0;
   private kickSlow = 0;
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(private readonly config: ConfigService) {
+    this.audioChannels = this.getAudioChannels();
+  }
 
   onModuleDestroy() {
     this.audioProcess?.kill('SIGTERM');
