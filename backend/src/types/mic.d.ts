@@ -1,21 +1,23 @@
 declare module 'mic' {
-    interface MicOptions {
-        rate?: string;
-        channels?: string;
-        debug?: boolean;
-        encoding?: string;
-        endian?: string;
-        device?: string;
-        bitwidth?: string;
+    namespace mic {
+        interface MicOptions {
+            rate?: string;
+            channels?: string;
+            debug?: boolean;
+            encoding?: string;
+            endian?: string;
+            device?: string;
+            bitwidth?: string;
+        }
+
+        interface MicInstance {
+            start: () => void;
+            stop: () => void;
+            getAudioStream: () => NodeJS.ReadableStream;
+        }
     }
 
-    interface MicInstance {
-        start: () => void;
-        stop: () => void;
-        getAudioStream: () => NodeJS.ReadableStream;
-    }
+    function mic(options?: mic.MicOptions): mic.MicInstance;
 
-    function mic(options?: MicOptions): MicInstance;
-
-    export default mic;
+    export = mic;
 }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 
 import MainBtn from "./MainBtn.vue";
-import {controlScenarios, fetchScenarios} from "../api/lightControll.ts";
+import {controlScenarios, fetchScenarios} from "../api/lightControl.ts";
 import type {ScenariosFromApi, ScenariosFrontend} from "../types/scenarios.ts";
 import {shallowRef, onMounted} from "vue";
 import {iconMapScenarios} from "../icon/icons.ts";

@@ -1,21 +1,25 @@
-import axios from "axios";
 import type {EffectFromApi} from "../types/rgb.ts";
+import { createApiClient } from "./client.ts";
 
-const axiosInstance = axios.create({
-    baseURL: 'http://192.168.11.78:3000/effects',
-    headers: {
-        'Content-Type': 'application/json',
-    }
-})
+const axiosInstance = createApiClient("effects");
 
 const saveBrightness = (brightness: number) => {
     localStorage.setItem('rgb_brightness', JSON.stringify(brightness))
 }
 
-export const sendEffect = async (id: number, effect: string, brightness: number, active?: boolean, color?: string) => {
+export const stopEffect = async (id?: number) => {
+    const res = await axiosInstance.post('/stop', id != null ? { id } : {})
+    return res.data
+}
 
+export const sendEffect = async (id: number, effect: string, brightness: number, active?: boolean, color?: number) => {
     saveBrightness(brightness)
-    const newActive = !active
+    const newActive = active === undefined ? true : !active
+
+    if (newActive === false) {
+        const res = await stopEffect(id)
+        return res
+    }
 
     const res = await axiosInstance.post('/start', {
         id,
@@ -24,7 +28,7 @@ export const sendEffect = async (id: number, effect: string, brightness: number,
         active: newActive,
         brightness
     })
-    return res.data;
+    return res.data
 }
 
 export const setBrightness = async (brightness: number) => {

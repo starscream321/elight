@@ -1,21 +1,9 @@
-import axios, { AxiosError } from "axios";
 import debounce from "../utils/debounce.ts";
 import type {ZoneFromApi} from "../types/zone.ts";
 import type {ScenariosFromApi} from "../types/scenarios.ts";
+import { createApiClient } from "./client.ts";
 
-const axiosInstance = axios.create({
-    baseURL: import.meta.env.VITE_API_URL || 'http://192.168.11.78:3000/yandex'
-});
-
-// Error interceptor
-axiosInstance.interceptors.response.use(
-    (response) => response,
-    (error: AxiosError) => {
-        const message = error.response?.data?.message || error.message || 'Произошла ошибка при запросе';
-        console.error('API Error:', message);
-        return Promise.reject(error);
-    }
-);
+const axiosInstance = createApiClient("yandex");
 
 export const saveBrightness = (brightness: number) => {
     localStorage.setItem('brightness', JSON.stringify(brightness))

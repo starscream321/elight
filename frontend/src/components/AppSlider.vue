@@ -3,7 +3,7 @@ import LightnessMaxIcon from '../assets/icons/lightness-max.svg'
 import LightnessMinIcon from '../assets/icons/lightness-min.svg'
 
 
-const brightness = defineModel()
+const brightness = defineModel<number>({ default: 0 })
 </script>
 
 <template>

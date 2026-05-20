@@ -2,7 +2,7 @@
 import AppSlider from "./AppSlider.vue";
 import {onMounted, ref, shallowRef, watch} from "vue";
 import MainBtn from "./MainBtn.vue";
-
+import debounce from "../utils/debounce.ts";
 import ColorRing from "./ColorRing.vue";
 import type {EffectFromApi, EffectFrontend} from "../types/rgb.ts";
 import {getEffects, sendEffect, setBrightness, setColor} from "../api/effects.ts";
@@ -13,6 +13,7 @@ import { iconMapEffects } from "../icon/icons.ts";
 const effects = shallowRef<EffectFrontend[]>([])
 const brightness = ref(0)
 const color = ref(0)
+const isLoading = ref(false)
 
 const getBrightnessFromLocalStorage = () => {
   const storageBrightness = localStorage.getItem('rgb_brightness')
@@ -33,9 +34,24 @@ const fetchEffects = async () => {
 
 
 
-const handleControl = async (id: number, effect: string, brightness: number, color?: string, active?: boolean) => {
-  await sendEffect(id, effect, brightness, active, color)
-  await fetchEffects()
+const handleControl = async (id: number, effect: string, brightness: number, color?: number, active?: boolean) => {
+  const previousEffects = effects.value;
+  const nextActive = active === undefined ? true : !active;
+
+  isLoading.value = true
+  effects.value = effects.value.map((item) => ({
+    ...item,
+    active: nextActive && item.id === id,
+  }))
+
+  try {
+    await sendEffect(id, effect, brightness, active, color)
+  } catch (error) {
+    effects.value = previousEffects;
+    throw error;
+  } finally {
+    isLoading.value = false
+  }
 }
 
 
@@ -44,12 +60,20 @@ onMounted(async () => {
   await fetchEffects()
 })
 
-watch( brightness, async (newBrightness) => {
-  await setBrightness(newBrightness)
+const debouncedSetBrightness = debounce(async (newBrightness: number) => {
+  await setBrightness(newBrightness / 100)
+}, 200)
+
+const debouncedSetColor = debounce(async (newColor: number) => {
+  await setColor(newColor)
+}, 200)
+
+watch(brightness, (newBrightness) => {
+  debouncedSetBrightness(newBrightness)
 })
 
-watch(color, async (newColor) => {
-  await setColor(newColor)
+watch(color, (newColor) => {
+  debouncedSetColor(newColor)
 })
 
 
@@ -73,6 +97,7 @@ watch(color, async (newColor) => {
           :name="effect.name"
           :icon="effect.icon"
           :active="effect.active"
+          :disabled="isLoading"
       />
     </div>
     <AppSlider

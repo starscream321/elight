@@ -56,7 +56,7 @@ export class YandexController {
     async controlScenarios(@Body() body: ControlScenarioDto): Promise<Scenarios> {
         const { scenarios_id } = body;
         if (!scenarios_id.length) {
-            throw new BadRequestException('Поле "id" не должно быть пустым');
+            throw new BadRequestException('Поле "scenarios_id" не должно быть пустым');
         }
         await this.yandexService.controlScenarios(scenarios_id);
         return { scenarios_id };
@@ -77,7 +77,7 @@ export class YandexController {
 
     @Post('/createDevice')
     async createDevice(@Body() body: CreateLightDto): Promise<YandexLights> {
-        return this.yandexService.createDevices(body as Partial<YandexLights>);
+        return this.yandexService.createDevices(body);
     }
 
     @Patch('/updateDevice/:id')

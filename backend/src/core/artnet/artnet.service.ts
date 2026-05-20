@@ -43,7 +43,8 @@ export class ArtnetService {
         this.packet[14] = universe & 0xff;
         this.packet[15] = (universe >> 8) & 0xff;
 
-        this.packet.set(dmx, 18);
+        this.packet.fill(0, 18);
+        this.packet.set(dmx.subarray(0, DMX_SIZE), 18);
 
         return new Promise((resolve, reject) => {
             this.socket.send(this.packet, ARTNET_PORT, ip, (err) => {

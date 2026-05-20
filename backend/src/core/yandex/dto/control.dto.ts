@@ -65,9 +65,25 @@ export class ControlScenarioDto {
 }
 
 export class CreateLightDto {
-    @IsOptional()
     @IsString()
-    id?: string;
+    id: string;
+
+    @IsString()
+    name: string;
+
+    @IsString()
+    icon: string;
+
+    @IsNumber()
+    @Type(() => Number)
+    x: number;
+
+    @IsNumber()
+    @Type(() => Number)
+    y: number;
+
+    @IsString()
+    zone: string;
 
     @IsOptional()
     @IsBoolean()

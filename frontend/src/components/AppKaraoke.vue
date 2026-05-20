@@ -19,7 +19,6 @@ const props = withDefaults(defineProps<Props>(), {
       <img class="qr" :src="props.qr" alt="qr" />
     </div>
     <div class="text_container">
-      <button>asd</button>
       <p class="title">{{ props.title }}</p>
       <p class="description">{{ props.description }}</p>
     </div>

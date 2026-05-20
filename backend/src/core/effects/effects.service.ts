@@ -6,9 +6,9 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
-import { hsvToRgb } from '../utils/color.utils';
-import { getAudioSpectrum } from '../utils/audio.utils';
+import { hsvToRgb, writeHsvToRgb } from '../utils/color.utils';
 import { Effect } from './effects.entity';
+import { AudioService } from './audio.service';
 
 type EffectFunction = (
     ledCount: number,
@@ -26,6 +26,7 @@ export class EffectsService {
     constructor(
         @InjectRepository(Effect)
         private readonly effectRepository: Repository<Effect>,
+        private readonly audioService: AudioService,
     ) {}
 
     private readonly MAX_BRIGHTNESS = 0.8;
@@ -145,12 +146,7 @@ export class EffectsService {
 
         for (let i = 0; i < ledCount; i++) {
             const hue = ((i / ledCount) * 360 * cycles + time * 10) % 360;
-            const [g, r, b] = hsvToRgb(hue, 1, safeBrightness);
-
-            const j = i * 3;
-            pixels[j] = g;
-            pixels[j + 1] = r;
-            pixels[j + 2] = b;
+            writeHsvToRgb(pixels, i * 3, hue, 1, safeBrightness);
         }
 
         return pixels;
@@ -193,7 +189,7 @@ export class EffectsService {
         const safeBrightness = this.clampBrightness(brightness, 0.08);
         if (safeBrightness === 0) return pixels;
 
-        const spectrum = getAudioSpectrum();
+        const spectrum = this.audioService.getAudioSpectrum();
 
         const nowSec = this.getTimeBase(timeInput) * this.SPEED_MUSIC;
         const dt =
@@ -284,14 +280,10 @@ export class EffectsService {
 
             value = this.softClip(value);
             value = this.clamp(value, 0, 1);
+            value = Number.isFinite(value) ? value : 0;
 
             const hue = (hueBase + i * 0.38 + hueBeatShift) % 360;
-            const [g, r, b] = hsvToRgb(hue, 1, value);
-
-            const j = i * 3;
-            pixels[j] = g;
-            pixels[j + 1] = r;
-            pixels[j + 2] = b;
+            writeHsvToRgb(pixels, i * 3, hue, 1, value);
         }
 
         return pixels;
@@ -318,12 +310,7 @@ export class EffectsService {
             const value = fade * safeBrightness;
 
             const hue = (time * 120 + i * 0.2) % 360;
-            const [g, r, b] = hsvToRgb(hue, 1, value);
-
-            const j = i * 3;
-            pixels[j] = g;
-            pixels[j + 1] = r;
-            pixels[j + 2] = b;
+            writeHsvToRgb(pixels, i * 3, hue, 1, value);
         }
 
         return pixels;
@@ -357,12 +344,7 @@ export class EffectsService {
             value = Math.min(1, value);
 
             const hue = (150 + 140 * mix) % 360;
-            const [g, r, b] = hsvToRgb(hue, 1, value);
-
-            const j = i * 3;
-            pixels[j] = g;
-            pixels[j + 1] = r;
-            pixels[j + 2] = b;
+            writeHsvToRgb(pixels, i * 3, hue, 1, value);
         }
 
         return pixels;
@@ -383,7 +365,7 @@ export class EffectsService {
         return effects[effectName];
     }
 
-    async findAll() {
+    async findAll(): Promise<Effect[]> {
         try {
             return await this.effectRepository.find();
         } catch (e) {

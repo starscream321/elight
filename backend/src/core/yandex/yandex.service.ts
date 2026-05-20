@@ -7,13 +7,13 @@ import {
     NotFoundException,
     ServiceUnavailableException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {HttpService} from '@nestjs/axios';
 import {InjectRepository} from '@nestjs/typeorm';
-import {Repository, UpdateResult} from 'typeorm';
-import {AxiosError} from 'axios';
+import {In, Repository, UpdateResult} from 'typeorm';
+import {AxiosError, AxiosResponse} from 'axios';
 import {lastValueFrom} from 'rxjs';
 import {YandexLights, YandexScenarios} from './yandex.entity';
-import * as process from "node:process";
 import {actionBrightness, actionOnOff, actionTemperatureK, YandexAction} from "./types/yandex.actions";
 
 type TargetType = 'devices' | 'scenarios';
@@ -30,19 +30,20 @@ export class YandexService {
         private readonly yandexRepo: Repository<YandexLights>,
         @InjectRepository(YandexScenarios)
         private readonly yandexScenariosRepo: Repository<YandexScenarios>,
+        private readonly config: ConfigService,
     ) {
     }
 
 
     private async sendApi(params:{
       targetType: TargetType,
-      id?: string,
+      id?: string | string[],
       actions?: YandexAction[],
       scenarios_id?: string,}
     ): Promise<void> {
         const { targetType, id, actions, scenarios_id } = params
-        let response;
-        const token = process.env.YANDEX_TOKEN;
+        let response: AxiosResponse;
+        const token = this.config.get<string>('YANDEX_TOKEN');
         if (!token) {
             this.logger.error('YANDEX_TOKEN не задан в окружении');
             throw new InternalServerErrorException('Отсутствует токен для Yandex API');
@@ -50,16 +51,21 @@ export class YandexService {
 
         try {
             if (targetType === 'devices') {
+                const ids = Array.isArray(id) ? id : id ? [id] : [];
+                if (!ids.length) {
+                    throw new BadRequestException('Не переданы устройства для Yandex API');
+                }
+
+                const devices = ids.map((deviceId) => ({
+                    id: deviceId,
+                    actions,
+                }));
+
                 response = await lastValueFrom(
                     this.http.post(
                         `${this.apiUrl}/${targetType}/actions`,
                         {
-                            [targetType]: [
-                                {
-                                    id,
-                                    actions,
-                                },
-                            ],
+                            [targetType]: devices,
                         },
                         {
                             headers: { Authorization: `Bearer ${token}` },
@@ -67,7 +73,7 @@ export class YandexService {
                         },
                     ),
                 );
-            } else if (targetType === 'scenarios') {
+            } else {
                 response = await lastValueFrom(
                     this.http.post(
                         `${this.apiUrl}/${targetType}/${scenarios_id}/actions`,
@@ -82,8 +88,18 @@ export class YandexService {
             this.logger.log(
                 `Ответ Yandex API [${targetType}/${id || scenarios_id}]: ${JSON.stringify(response.data, null, 2)}`,
             );
+            this.assertYandexResponseSuccess(response.data);
         } catch (err) {
-            const e = err as AxiosError<any>;
+            if (
+                err instanceof BadRequestException ||
+                err instanceof BadGatewayException ||
+                err instanceof ServiceUnavailableException ||
+                err instanceof InternalServerErrorException
+            ) {
+                throw err;
+            }
+
+            const e = err as AxiosError<Record<string, unknown>>;
             this.logger.error(
                 `Ошибка запроса к Yandex API [${targetType}/${id}]`,
                 e.stack || String(e),
@@ -110,6 +126,80 @@ export class YandexService {
 
             throw new ServiceUnavailableException(`Не удалось связаться с Yandex API: ${e.message}`);
         }
+    }
+
+    private assertYandexResponseSuccess(data: unknown) {
+        const failures = this.collectYandexFailures(data);
+        if (!failures.length) return;
+
+        throw new BadGatewayException(`Yandex API вернул ошибки: ${failures.join('; ')}`);
+    }
+
+    private collectYandexFailures(value: unknown, path = 'response'): string[] {
+        if (!value || typeof value !== 'object') return [];
+
+        if (Array.isArray(value)) {
+            return value.flatMap((item, index) => this.collectYandexFailures(item, `${path}[${index}]`));
+        }
+
+        const record = value as Record<string, unknown>;
+        const status = record.status;
+        const failures: string[] = [];
+
+        if (typeof status === 'string' && !this.isSuccessfulYandexStatus(status)) {
+            const message = this.getYandexErrorMessage(record);
+            failures.push(`${path}: ${status}${message ? ` (${message})` : ''}`);
+        }
+
+        for (const [key, nested] of Object.entries(record)) {
+            if (nested && typeof nested === 'object') {
+                failures.push(...this.collectYandexFailures(nested, `${path}.${key}`));
+            }
+        }
+
+        return failures;
+    }
+
+    private isSuccessfulYandexStatus(status: string) {
+        return ['DONE', 'SUCCESS', 'OK'].includes(status.toUpperCase());
+    }
+
+    private getYandexErrorMessage(record: Record<string, unknown>) {
+        const error = record.error;
+        if (typeof error === 'string') return error;
+
+        if (error && typeof error === 'object') {
+            const errorRecord = error as Record<string, unknown>;
+            const message = errorRecord.message || errorRecord.error || errorRecord.code;
+            return typeof message === 'string' ? message : undefined;
+        }
+
+        const message = record.message || record.error_message;
+        return typeof message === 'string' ? message : undefined;
+    }
+
+    private buildDeviceActions(
+        on?: boolean,
+        brightness?: number,
+        temperature_k?: number,
+    ): YandexAction[] {
+        const actions: YandexAction[] = [];
+
+        if (typeof on === 'boolean') {
+            actions.push(actionOnOff(on));
+        }
+        if (typeof brightness === 'number') {
+            actions.push(actionBrightness(brightness));
+        }
+        if (typeof temperature_k === 'number') {
+            actions.push(actionTemperatureK(temperature_k));
+        }
+
+        if (actions.length === 0) {
+            throw new BadRequestException('Не передано ни одного действия');
+        }
+
+        return actions;
     }
 
     async updateDevice(id: string, active?: boolean): Promise<void> {
@@ -151,21 +241,7 @@ export class YandexService {
         temperature_k?: number,
     ): Promise<void> {
 
-        const actions: YandexAction[] = [];
-
-        if (typeof on === 'boolean') {
-            actions.push(actionOnOff(on));
-        }
-        if (typeof brightness === 'number') {
-            actions.push(actionBrightness(brightness));
-        }
-        if (typeof temperature_k === 'number') {
-            actions.push(actionTemperatureK(temperature_k));
-        }
-
-        if (actions.length === 0) {
-            throw new BadRequestException('Не передано ни одного действия');
-        }
+        const actions = this.buildDeviceActions(on, brightness, temperature_k);
 
         await this.sendApi({targetType:'devices', id: id, actions: actions});
         if (on !== undefined) {
@@ -179,19 +255,15 @@ export class YandexService {
         brightness?: number,
         temperature_k?: number,
     ): Promise<void> {
-        const results = await Promise.allSettled(
-            ids.map((id) => this.controlDevice(id, on, brightness, temperature_k)),
-        );
+        const actions = this.buildDeviceActions(on, brightness, temperature_k);
 
-        const errors = results
-            .map((r, i) => ({ r, id: ids[i] }))
-            .filter((x) => x.r.status === 'rejected') as { r: PromiseRejectedResult; id: string }[];
+        await this.sendApi({targetType:'devices', id: ids, actions});
 
-        if (errors.length) {
-            const details = errors
-                .map((e) => `${e.id}: ${(e.r.reason as Error)?.message || 'unknown error'}`)
-                .join('; ');
-            throw new BadGatewayException(`Ошибки при управлении устройствами: ${details}`);
+        if (on !== undefined) {
+            const res = await this.yandexRepo.update({ id: In(ids) }, { active: on });
+            if (!res.affected) {
+                throw new NotFoundException('Устройства не найдены');
+            }
         }
     }
 

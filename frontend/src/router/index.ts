@@ -1,24 +1,21 @@
 import { createRouter, createWebHistory } from "vue-router";
-import Light from "../views/Light.vue";
-import Karaoke from "../views/Karaoke.vue";
-import Info from "../views/Info.vue"
 
 
 const routes = [
     {
         path: '/',
         name: 'Light',
-        component: Light
+        component: () => import("../views/Light.vue")
     },
     {
         path: '/karaoke',
         name: 'Karaoke',
-        component: Karaoke
+        component: () => import("../views/Karaoke.vue")
     },
     {
         path: '/info',
         name: 'Info',
-        component: Info
+        component: () => import("../views/Info.vue")
     }
 ]
 

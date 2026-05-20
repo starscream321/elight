@@ -21,33 +21,36 @@ import RomanceIcon from '../assets/icons/romance.svg';
 import type {IconLightsKey} from '../types/zone';
 import type {IconEffectsKey} from "../types/rgb.ts";
 import type {IconScenariosKey} from "../types/scenarios.ts";
+import type { Component } from 'vue';
 
-export const iconMapLights: Record<IconLightsKey, any> = {
-    floor: FlorIcon,
-    tv: TvIcon,
-    massage: MassageIcon,
-    desktop: PcIcon,
-    table: TableIcon,
-    ceiling: CeilingsIcon,
-    entrance: EntranceIcon,
-    locker: LockerIcon,
+const asIcon = (icon: unknown) => icon as Component;
+
+export const iconMapLights: Record<IconLightsKey, Component> = {
+    floor: asIcon(FlorIcon),
+    tv: asIcon(TvIcon),
+    massage: asIcon(MassageIcon),
+    desktop: asIcon(PcIcon),
+    table: asIcon(TableIcon),
+    ceiling: asIcon(CeilingsIcon),
+    entrance: asIcon(EntranceIcon),
+    locker: asIcon(LockerIcon),
 };
 
-export const iconMapEffects: Record<IconEffectsKey, any> = {
-    effectsOff: EffectsOffIcon,
-    comet: CometIcon,
-    pulse: PulseIcon,
-    rainbow: RainbowIcon,
-    music: MusicIcon,
-    aurora: AuroraIcon,
+export const iconMapEffects: Record<IconEffectsKey, Component> = {
+    effectsOff: asIcon(EffectsOffIcon),
+    comet: asIcon(CometIcon),
+    pulse: asIcon(PulseIcon),
+    rainbow: asIcon(RainbowIcon),
+    music: asIcon(MusicIcon),
+    aurora: asIcon(AuroraIcon),
 }
 
-export const iconMapScenarios: Record<IconScenariosKey, any> = {
-    lightness_max: LightnessMaxIcon,
-    night: NightIcon,
-    default_light: DefaultLightIcon,
-    games: GamesIcon,
-    party: PartyIcon,
-    romance: RomanceIcon,
+export const iconMapScenarios: Record<IconScenariosKey, Component> = {
+    lightness_max: asIcon(LightnessMaxIcon),
+    night: asIcon(NightIcon),
+    default_light: asIcon(DefaultLightIcon),
+    games: asIcon(GamesIcon),
+    party: asIcon(PartyIcon),
+    romance: asIcon(RomanceIcon),
 }
 

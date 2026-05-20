@@ -1,6 +1,7 @@
 import {CanActivate, ExecutionContext, Injectable, UnauthorizedException} from "@nestjs/common";
 import {ConfigService} from "@nestjs/config";
 import {Observable} from "rxjs";
+import { Request } from 'express';
 
 @Injectable()
 export class ApiKeyGuard implements CanActivate {

@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import type { Component } from 'vue';
 
-const props = defineProps<{
+defineProps<{
   name: string,
-  icon: any,
+  icon: Component | null,
   active: boolean,
+  disabled?: boolean,
 }>()
 
 </script>
@@ -11,7 +13,8 @@ const props = defineProps<{
 <template>
   <button
       class="main_btn"
-      :class="{active: props.active}"
+      :class="{active: active}"
+      :disabled="disabled"
   >
     <component
         :is="icon"
@@ -58,6 +61,11 @@ const props = defineProps<{
 .main_btn.active {
   background: rgba(255, 255, 255, 0.8);
   color: black;
+}
+
+.main_btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 </style>

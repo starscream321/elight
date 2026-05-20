@@ -10,7 +10,7 @@ async function bootstrap() {
   app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
-        transform: true, // 🔥 обязательно
+        transform: true,
       }),
   );
   app.useGlobalGuards(app.get(ApiKeyGuard))

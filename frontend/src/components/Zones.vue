@@ -6,7 +6,7 @@ import MainBtn from "./MainBtn.vue";
 import AppSlider from "./AppSlider.vue";
 import type {ZoneFromApi, ZoneFrontend} from "../types/zone.ts";
 import {iconMapLights} from "../icon/icons.ts";
-import {controlDevice, fetchLights, sendBrightness} from "../api/lightControll.ts";
+import {controlDevice, fetchLights, sendBrightness} from "../api/lightControl.ts";
 
 
 
@@ -14,6 +14,7 @@ import {controlDevice, fetchLights, sendBrightness} from "../api/lightControll.t
 const brightness = ref<number>(0)
 
 const zones = shallowRef<ZoneFrontend[]>([])
+const pendingZoneIds = ref<Set<string>>(new Set())
 
 
 const getBrightnessFromLocalStorage = () => {
@@ -30,9 +31,25 @@ const updateZones = async () => {
   }))]
 }
 
-const handleControl = async (id: string, active: boolean) => {
-  await controlDevice(id, active)
-  await updateZones()
+const handleControl = async (id: string, currentActive: boolean) => {
+  if (pendingZoneIds.value.has(id)) return;
+
+  const previousZones = zones.value;
+  pendingZoneIds.value = new Set(pendingZoneIds.value).add(id);
+  zones.value = zones.value.map((zone) =>
+      zone.id === id ? { ...zone, active: !currentActive } : zone,
+  );
+
+  try {
+    await controlDevice(id, currentActive)
+  } catch (error) {
+    zones.value = previousZones;
+    throw error;
+  } finally {
+    const nextPendingIds = new Set(pendingZoneIds.value);
+    nextPendingIds.delete(id);
+    pendingZoneIds.value = nextPendingIds;
+  }
 }
 
 onMounted(async () => {
@@ -70,6 +87,7 @@ const bottomZones = computed(() => zones.value.filter(z => z.zone === 'bot'))
         :icon="btn.icon"
         :key="btn.id"
         :active="btn.active"
+        :disabled="pendingZoneIds.has(btn.id)"
         :style="{
           gridColumn: btn.x,
           gridRow: btn.y,
@@ -86,6 +104,7 @@ const bottomZones = computed(() => zones.value.filter(z => z.zone === 'bot'))
         :icon="btn.icon"
         :key="btn.id"
         :active="btn.active"
+        :disabled="pendingZoneIds.has(btn.id)"
         :style="{
         gridColumn: btn.x,
         gridRow: btn.y,
@@ -102,6 +121,7 @@ const bottomZones = computed(() => zones.value.filter(z => z.zone === 'bot'))
         :icon="btn.icon"
         :key="btn.id"
         :active="btn.active"
+        :disabled="pendingZoneIds.has(btn.id)"
         :style="{
         gridColumn: btn.x,
         gridRow: btn.y,
