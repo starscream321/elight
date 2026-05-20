@@ -14,9 +14,9 @@ const AUTO_DEVICE_VALUE = 'auto';
 const LEGACY_WINDOWS_AUDIO_DEVICE = 'CABLE Output (VB-Audio Virtual Cable)';
 const DEFAULT_AUTO_MIN_RMS = 0.002;
 const DEFAULT_DEBUG_INTERVAL_MS = 1000;
-const ENVELOPE_BEAT_THRESHOLD = 0.024;
-const ENVELOPE_BEAT_RATIO = 1.32;
-const ENVELOPE_BEAT_COOLDOWN_SAMPLES = Math.round(SAMPLE_RATE * 0.115);
+const ENVELOPE_BEAT_THRESHOLD = 0.04;
+const ENVELOPE_BEAT_RATIO = 1.7;
+const ENVELOPE_BEAT_COOLDOWN_SAMPLES = Math.round(SAMPLE_RATE * 0.17);
 
 export interface AudioFeatures {
   kick: number;
@@ -74,7 +74,7 @@ export class AudioService implements OnModuleDestroy {
   private beatCooldown = 0;
   private lowEnergyHistoryIndex = 0;
   private lowEnergyHistoryCount = 0;
-  private readonly lowEnergyHistory = new Float32Array(32);
+  private readonly lowEnergyHistory = new Float32Array(64);
   private inputEnvelopeFast = 0;
   private inputEnvelopeSlow = 0;
   private envelopeBeatCooldownSamples = 0;
@@ -115,39 +115,51 @@ export class AudioService implements OnModuleDestroy {
     const midRaw = this.safeAvgRange(mags, idx(260), idx(1800));
     const trebleRaw = this.safeAvgRange(mags, idx(1800), idx(7000));
 
-    this.peak.kick = Math.max(this.peak.kick * 0.988, kickRaw);
-    this.peak.bass = Math.max(this.peak.bass * 0.99, bassRaw);
-    this.peak.mid = Math.max(this.peak.mid * 0.992, midRaw);
-    this.peak.treble = Math.max(this.peak.treble * 0.992, trebleRaw);
+    this.peak.kick = Math.max(this.peak.kick * 0.9985, kickRaw);
+    this.peak.bass = Math.max(this.peak.bass * 0.9988, bassRaw);
+    this.peak.mid = Math.max(this.peak.mid * 0.9992, midRaw);
+    this.peak.treble = Math.max(this.peak.treble * 0.9992, trebleRaw);
 
-    const kickNorm = this.noiseGate(kickRaw / this.peak.kick, 0.025);
-    const bassNorm = this.noiseGate(bassRaw / this.peak.bass, 0.035);
-    const midNorm = this.noiseGate(midRaw / this.peak.mid, 0.04);
-    const trebleNorm = this.noiseGate(trebleRaw / this.peak.treble, 0.03);
+    const kickNorm = this.shapeBand(
+      this.noiseGate(kickRaw / this.peak.kick, 0.08),
+      1.25,
+    );
+    const bassNorm = this.shapeBand(
+      this.noiseGate(bassRaw / this.peak.bass, 0.09),
+      1.3,
+    );
+    const midNorm = this.shapeBand(
+      this.noiseGate(midRaw / this.peak.mid, 0.18),
+      1.65,
+    );
+    const trebleNorm = this.shapeBand(
+      this.noiseGate(trebleRaw / this.peak.treble, 0.22),
+      1.8,
+    );
 
     this.smoothed.kick = this.smoothValue(
       kickNorm,
       this.smoothed.kick,
-      0.45,
-      0.2,
+      0.38,
+      0.16,
     );
     this.smoothed.bass = this.smoothValue(
       bassNorm,
       this.smoothed.bass,
-      0.35,
-      0.18,
+      0.3,
+      0.14,
     );
     this.smoothed.mid = this.smoothValue(
       midNorm,
       this.smoothed.mid,
-      0.28,
-      0.15,
+      0.18,
+      0.09,
     );
     this.smoothed.treble = this.smoothValue(
       trebleNorm,
       this.smoothed.treble,
-      0.22,
-      0.12,
+      0.14,
+      0.07,
     );
 
     const energy =
@@ -554,6 +566,10 @@ export class AudioService implements OnModuleDestroy {
     return value > threshold ? (value - threshold) / (1 - threshold) : 0;
   }
 
+  private shapeBand(value: number, exponent: number) {
+    return Math.pow(this.clamp(value, 0, 1), exponent);
+  }
+
   private conditionInputSample(sample: number) {
     const clipped = this.clamp(sample, -0.98, 0.98);
     const filtered = clipped - this.dcBlockX + 0.995 * this.dcBlockY;
@@ -638,17 +654,17 @@ export class AudioService implements OnModuleDestroy {
     this.pushLowEnergy(lowEnergy);
 
     if (this.beatCooldown > 0) this.beatCooldown--;
-    if (this.lowEnergyHistoryCount < 16) return false;
+    if (this.lowEnergyHistoryCount < 24) return false;
 
-    const dynamicFloor = stats.mean + stats.stdDev * 0.45 + 1e-6;
+    const dynamicFloor = stats.mean + stats.stdDev * 0.7 + 1e-6;
     const transient = lowEnergy - stats.mean;
     const ratio = lowEnergy / dynamicFloor;
 
     const beat =
-      transient > stats.stdDev * 1.05 &&
-      ratio > 1.15 &&
+      transient > stats.stdDev * 1.75 &&
+      ratio > 1.35 &&
       this.beatCooldown === 0;
-    if (beat) this.beatCooldown = 5;
+    if (beat) this.beatCooldown = 9;
 
     return beat;
   }

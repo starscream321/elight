@@ -214,12 +214,12 @@ export class EffectsService {
       9,
       safeDt,
     );
-    this.smoothMid = this.smoothAR(this.smoothMid, spectrum.mid, 16, 8, safeDt);
+    this.smoothMid = this.smoothAR(this.smoothMid, spectrum.mid, 10, 5, safeDt);
     this.smoothTreble = this.smoothAR(
       this.smoothTreble,
       spectrum.treble,
-      14,
-      7,
+      8,
+      4,
       safeDt,
     );
     this.smoothEnergy = this.smoothAR(
@@ -236,8 +236,8 @@ export class EffectsService {
     const kickAmp =
       Math.pow(this.smoothKick, 0.95) * 1.85 * (1 + kickIsolation * 0.2);
     const bassAmp = Math.pow(this.smoothBass, 0.8) * 1.1;
-    const midAmp = Math.pow(this.smoothMid, 0.75) * 0.65;
-    const trebleAmp = Math.pow(this.smoothTreble, 0.7) * 0.55;
+    const midAmp = Math.pow(this.smoothMid, 0.9) * 0.42;
+    const trebleAmp = Math.pow(this.smoothTreble, 0.95) * 0.32;
 
     const kickDelta = Math.max(0, this.smoothKick - this.previousKick);
     this.previousKick = this.smoothKick;
@@ -249,8 +249,8 @@ export class EffectsService {
       this.beatFlash = 1;
       this.beatBurst = Math.min(1.6, this.beatBurst + 1.05);
     }
-    this.beatFlash = this.smoothAR(this.beatFlash, 0, 18, 18, safeDt);
-    this.beatBurst = this.smoothAR(this.beatBurst, 0, 22, 13, safeDt);
+    this.beatFlash = this.smoothAR(this.beatFlash, 0, 16, 14, safeDt);
+    this.beatBurst = this.smoothAR(this.beatBurst, 0, 18, 10, safeDt);
 
     const energyBoost = 0.32 + this.smoothEnergy * 0.55;
     const beatBoost = 1 + this.beatFlash * 1.55 + this.beatBurst * 0.65;
@@ -309,18 +309,18 @@ export class EffectsService {
           9,
         ) *
         this.smoothTreble *
-        (0.08 + this.beatFlash * 0.75);
+        (0.03 + this.beatFlash * 0.45);
       const texture =
-        Math.sin(i * 0.31 + phaseMidOffset + this.smoothEnergy * 4) * 0.025 +
-        Math.sin(i * 0.73 - phaseTrebleOffset) * 0.018;
+        Math.sin(i * 0.31 + phaseMidOffset + this.smoothEnergy * 4) * 0.012 +
+        Math.sin(i * 0.73 - phaseTrebleOffset) * 0.008;
 
       let value =
         (kickWave * 0.24 +
           bassWave * 0.09 +
           bassRibbon * 0.14 +
-          midWave * 0.06 +
-          trebleWave * 0.04 +
-          trebleSpark * 0.22 +
+          midWave * 0.035 +
+          trebleWave * 0.02 +
+          trebleSpark * 0.08 +
           beatPulse * 1.45 +
           this.beatFlash * 0.18 +
           transientPunch * 0.55 +
