@@ -34,7 +34,7 @@ export class EffectsService {
   private readonly TIME_INPUT: 'ms' | 'frames' = 'ms';
 
   private readonly SPEED_RAINBOW = 0.25;
-  private readonly SPEED_COMET = 0.12;
+  private readonly SPEED_COMET = 0.45;
   private readonly SPEED_AURORA = 0.4;
   private readonly SPEED_MUSIC = 0.35;
   private readonly SPEED_SMOOTH_FADE = 1.0;
@@ -384,7 +384,7 @@ export class EffectsService {
     if (safeBrightness === 0) return pixels;
 
     const time = this.getTimeBase(timeInput) * this.SPEED_COMET;
-    const head = Math.floor(time * 30) % ledCount;
+    const head = (time * 30) % ledCount;
     const tailLength = Math.max(3, Math.floor(ledCount * 0.025));
 
     for (let i = 0; i < ledCount; i++) {
