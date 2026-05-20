@@ -40,15 +40,14 @@ export class EffectsService {
   private readonly SPEED_SMOOTH_FADE = 1.0;
 
   private beatFlash = 0;
-  private beatBurst = 0;
   private previousKick = 0;
 
   private lastMusicTimeSec: number | null = null;
 
-  private phaseKick = 0;
-  private phaseBass = 0;
-  private phaseMid = 0;
-  private phaseTreble = 0;
+  private musicFlow = 0;
+  private musicTexture = 0;
+  private pulseAge = 10;
+  private pulseStrength = 0;
 
   private smoothKick = 0;
   private smoothBass = 0;
@@ -58,13 +57,12 @@ export class EffectsService {
 
   public resetState(): void {
     this.beatFlash = 0;
-    this.beatBurst = 0;
     this.previousKick = 0;
     this.lastMusicTimeSec = null;
-    this.phaseKick = 0;
-    this.phaseBass = 0;
-    this.phaseMid = 0;
-    this.phaseTreble = 0;
+    this.musicFlow = 0;
+    this.musicTexture = 0;
+    this.pulseAge = 10;
+    this.pulseStrength = 0;
     this.smoothKick = 0;
     this.smoothBass = 0;
     this.smoothMid = 0;
@@ -99,6 +97,16 @@ export class EffectsService {
 
   private softClip(x: number): number {
     return x / (1 + Math.abs(x) * 1.15);
+  }
+
+  private gaussian(distance: number, width: number): number {
+    const safeWidth = Math.max(0.0001, width);
+    const t = distance / safeWidth;
+    return Math.exp(-0.5 * t * t);
+  }
+
+  private fract(value: number): number {
+    return value - Math.floor(value);
   }
 
   private smoothAR(
@@ -233,98 +241,119 @@ export class EffectsService {
     const kickIsolation =
       this.smoothKick / (this.smoothBass * 0.6 + this.smoothMid * 0.3 + 0.3);
 
-    const kickAmp =
-      Math.pow(this.smoothKick, 0.95) * 1.85 * (1 + kickIsolation * 0.2);
-    const bassAmp = Math.pow(this.smoothBass, 0.8) * 1.1;
-    const midAmp = Math.pow(this.smoothMid, 0.9) * 0.42;
-    const trebleAmp = Math.pow(this.smoothTreble, 0.95) * 0.32;
-
     const kickDelta = Math.max(0, this.smoothKick - this.previousKick);
     this.previousKick = this.smoothKick;
 
     const transientPunch =
-      Math.pow(kickDelta, 0.76) * 3.8 * (1 + kickIsolation * 0.25);
+      Math.pow(kickDelta, 0.78) * 1.75 * (1 + kickIsolation * 0.3);
 
     if (spectrum.beat) {
       this.beatFlash = 1;
-      this.beatBurst = Math.min(1.6, this.beatBurst + 1.05);
+      this.pulseAge = 0;
+      this.pulseStrength = this.clamp(
+        0.55 +
+          this.smoothKick * 0.45 +
+          this.smoothBass * 0.2 +
+          transientPunch * 0.18,
+        0,
+        1.35,
+      );
     }
-    this.beatFlash = this.smoothAR(this.beatFlash, 0, 16, 14, safeDt);
-    this.beatBurst = this.smoothAR(this.beatBurst, 0, 18, 10, safeDt);
 
-    const energyBoost = 0.32 + this.smoothEnergy * 0.55;
-    const beatBoost = 1 + this.beatFlash * 1.55 + this.beatBurst * 0.65;
+    this.beatFlash = this.smoothAR(this.beatFlash, 0, 18, 11, safeDt);
+    this.pulseStrength = this.smoothAR(this.pulseStrength, 0, 12, 4.8, safeDt);
+    this.pulseAge += safeDt;
 
-    const speedKick = 2.2 + this.smoothEnergy * 1.0;
-    const speedBass = 1.6 + this.smoothEnergy * 0.8;
-    const speedMid = 1.1 + this.smoothEnergy * 0.7;
-    const speedTreble = 0.8 + this.smoothEnergy * 0.6;
+    const melodicDensity = this.clamp(
+      this.smoothMid * 0.78 + this.smoothEnergy * 0.55,
+      0,
+      1.25,
+    );
+    const lowDrive = this.clamp(
+      this.smoothBass * 0.75 + this.smoothKick * 0.45,
+      0,
+      1.3,
+    );
+    const trebleDust = this.clamp(
+      this.smoothTreble * 0.9 + this.beatFlash * 0.2,
+      0,
+      1.15,
+    );
 
-    this.phaseKick += safeDt * speedKick;
-    this.phaseBass += safeDt * speedBass;
-    this.phaseMid += safeDt * speedMid;
-    this.phaseTreble += safeDt * speedTreble;
+    this.musicFlow += safeDt * (0.2 + this.smoothEnergy * 0.28);
+    this.musicTexture += safeDt * (0.8 + this.smoothTreble * 0.9);
 
-    const hueBeatShift =
-      this.beatFlash * 30 +
-      this.beatBurst * 18 +
-      transientPunch * 24 +
-      this.smoothMid * 16;
+    const travelSpan = ledCount + ledCount * 0.34;
+    const travelHead = (this.musicFlow * ledCount * 0.62) % travelSpan;
+    const baseCenter = travelHead - ledCount * 0.17;
+    const baseWidth = Math.max(ledCount * 0.09, ledCount * (0.11 + melodicDensity * 0.18));
+    const baseThickness = 0.18 + melodicDensity * 0.34;
+    const glowFloor = 0.018 + this.smoothEnergy * 0.06;
 
-    // Pre-calculate constant values outside the loop
-    const phaseKickOffset = this.phaseKick * 6.2;
-    const phaseBassOffset = this.phaseBass * 4.8;
-    const phaseMidOffset = this.phaseMid * 4.1;
-    const phaseTrebleOffset = this.phaseTreble * 3.2;
-    const brightnessMultiplier = safeBrightness * energyBoost * beatBoost;
-    const beatCenter =
-      (this.phaseKick * 17 + this.beatBurst * ledCount * 0.11) % ledCount;
-    const beatWidth = Math.max(3, ledCount * (0.022 + this.beatBurst * 0.035));
-    const bassSweep = this.phaseBass * ledCount * 0.18;
+    const pulseCenter = (ledCount - 1) * 0.5;
+    const pulseRadius = this.pulseAge * ledCount * (0.85 + this.smoothKick * 0.55);
+    const pulseShellWidth = Math.max(1.3, ledCount * (0.022 + this.pulseStrength * 0.02));
+    const pulseFade = Math.max(0, 1 - this.pulseAge * 1.9);
+    const pulseCoreFade = Math.max(0, 1 - this.pulseAge * 4.6);
+    const pulseCoreWidth = Math.max(1.8, ledCount * (0.035 + this.pulseStrength * 0.02));
+    const hueDrift = this.smoothMid * 18 + this.smoothTreble * 12 + transientPunch * 10;
+    const brightnessMultiplier =
+      safeBrightness * (0.48 + this.smoothEnergy * 0.34 + this.beatFlash * 0.16);
 
     for (let i = 0; i < ledCount; i++) {
-      const beatDistance = Math.min(
-        Math.abs(i - beatCenter),
-        ledCount - Math.abs(i - beatCenter),
+      const distToBand = i - baseCenter;
+      const leadingBand = this.gaussian(distToBand, baseWidth);
+      const trailingBand = this.gaussian(
+        i - (baseCenter - baseWidth * 0.72),
+        baseWidth * 1.45,
       );
-      const beatPulse =
-        Math.max(0, 1 - beatDistance / beatWidth) *
-        (this.beatBurst * 2.4 + transientPunch * 0.85);
-      const kickWave =
-        (Math.sin(i * 0.04 + phaseKickOffset) * 0.5 + 0.5) * kickAmp;
-      const bassWave =
-        (Math.sin(i * 0.052 + phaseBassOffset) * 0.5 + 0.5) * bassAmp;
-      const midWave =
-        Math.pow(Math.sin(i * 0.09 + phaseMidOffset) * 0.5 + 0.5, 1.4) * midAmp;
-      const trebleWave =
-        Math.pow(Math.sin(i * 0.17 + phaseTrebleOffset) * 0.5 + 0.5, 3.2) *
-        trebleAmp;
-      const bassRibbon =
-        Math.pow(Math.sin(i * 0.021 - bassSweep) * 0.5 + 0.5, 2.1) *
-        this.smoothBass;
-      const trebleSpark =
-        Math.pow(
-          Math.sin(i * 1.73 + phaseTrebleOffset * 2.7 + this.phaseMid) * 0.5 +
-            0.5,
-          9,
-        ) *
-        this.smoothTreble *
-        (0.03 + this.beatFlash * 0.45);
-      const texture =
-        Math.sin(i * 0.31 + phaseMidOffset + this.smoothEnergy * 4) * 0.012 +
-        Math.sin(i * 0.73 - phaseTrebleOffset) * 0.008;
+      const bandBody = leadingBand * (0.42 + baseThickness) + trailingBand * 0.22;
+      const bandTexture =
+        (Math.sin(i * 0.095 - this.musicFlow * 8.2) * 0.5 + 0.5) *
+          (0.08 + lowDrive * 0.18) +
+        (Math.sin(i * 0.16 - this.musicTexture * 5.6 + this.smoothMid * 3) *
+          0.5 +
+          0.5) *
+          (0.05 + melodicDensity * 0.08);
+      const baseWave = glowFloor + bandBody * (0.35 + bandTexture);
+
+      const centerDistance = Math.abs(i - pulseCenter);
+      const pulseCore =
+        this.gaussian(centerDistance, pulseCoreWidth) *
+        pulseCoreFade *
+        (0.45 + this.pulseStrength * 0.95);
+      const pulseShell =
+        this.gaussian(Math.abs(centerDistance - pulseRadius), pulseShellWidth) *
+        pulseFade *
+        this.pulseStrength *
+        1.35;
+
+      const sparkleSeed = this.fract(
+        Math.sin(i * 12.9898 + this.musicTexture * 17.123 + this.musicFlow * 9.37) *
+          43758.5453,
+      );
+      const sparkleGate = 0.993 - trebleDust * 0.045;
+      const sparkleBurst =
+        sparkleSeed > sparkleGate
+          ? Math.pow((sparkleSeed - sparkleGate) / (1 - sparkleGate), 2.7)
+          : 0;
+      const sparkle =
+        sparkleBurst *
+        (0.18 + trebleDust * 0.85) *
+        (0.45 + leadingBand * 0.4 + this.beatFlash * 0.35);
+
+      const undertow =
+        (Math.sin(i * 0.043 - this.musicFlow * 3.4) * 0.5 + 0.5) *
+        (0.025 + lowDrive * 0.045);
 
       let value =
-        (kickWave * 0.24 +
-          bassWave * 0.09 +
-          bassRibbon * 0.14 +
-          midWave * 0.035 +
-          trebleWave * 0.02 +
-          trebleSpark * 0.08 +
-          beatPulse * 1.45 +
-          this.beatFlash * 0.18 +
-          transientPunch * 0.55 +
-          texture) *
+        (baseWave +
+          pulseCore +
+          pulseShell +
+          sparkle +
+          undertow +
+          transientPunch * 0.16 +
+          this.beatFlash * 0.05) *
         brightnessMultiplier;
 
       value = this.softClip(value);
@@ -333,11 +362,11 @@ export class EffectsService {
 
       const hue =
         (hueBase +
-          i * (0.28 + this.smoothTreble * 0.25) +
-          hueBeatShift +
-          bassRibbon * 18 +
-          midWave * 8 -
-          beatPulse * 42) %
+          hueDrift +
+          leadingBand * (8 + melodicDensity * 16) +
+          pulseShell * 12 +
+          sparkle * 28 +
+          i * (0.05 + this.smoothTreble * 0.06)) %
         360;
       writeHsvToRgb(pixels, i * 3, hue, 1, value);
     }
