@@ -48,6 +48,9 @@ export class EffectsService {
   private musicTexture = 0;
   private pulseAge = 10;
   private pulseStrength = 0;
+  private bassFrontAge = 10;
+  private bassFrontStrength = 0;
+  private dropFlash = 0;
 
   private smoothKick = 0;
   private smoothBass = 0;
@@ -63,6 +66,9 @@ export class EffectsService {
     this.musicTexture = 0;
     this.pulseAge = 10;
     this.pulseStrength = 0;
+    this.bassFrontAge = 10;
+    this.bassFrontStrength = 0;
+    this.dropFlash = 0;
     this.smoothKick = 0;
     this.smoothBass = 0;
     this.smoothMid = 0;
@@ -247,7 +253,19 @@ export class EffectsService {
     const transientPunch =
       Math.pow(kickDelta, 0.78) * 1.75 * (1 + kickIsolation * 0.3);
 
-    if (spectrum.beat) {
+    const bassImpact = this.clamp(
+      this.smoothKick * 0.62 + this.smoothBass * 0.32 + transientPunch * 0.28,
+      0,
+      1.5,
+    );
+    const bassHit = spectrum.beat || transientPunch > 0.32;
+    const dropHit =
+      bassHit &&
+      this.smoothEnergy > 0.55 &&
+      this.smoothBass > 0.38 &&
+      this.smoothMid > 0.28;
+
+    if (bassHit) {
       this.beatFlash = 1;
       this.pulseAge = 0;
       this.pulseStrength = this.clamp(
@@ -258,11 +276,28 @@ export class EffectsService {
         0,
         1.35,
       );
+      this.bassFrontAge = 0;
+      this.bassFrontStrength = this.clamp(0.48 + bassImpact * 0.82, 0, 1.65);
+    }
+
+    if (dropHit) {
+      this.dropFlash = 1;
+      this.pulseStrength = Math.min(1.55, this.pulseStrength + 0.25);
+      this.bassFrontStrength = Math.min(1.85, this.bassFrontStrength + 0.35);
     }
 
     this.beatFlash = this.smoothAR(this.beatFlash, 0, 18, 11, safeDt);
     this.pulseStrength = this.smoothAR(this.pulseStrength, 0, 12, 4.8, safeDt);
     this.pulseAge += safeDt;
+    this.bassFrontStrength = this.smoothAR(
+      this.bassFrontStrength,
+      0,
+      18,
+      5.4,
+      safeDt,
+    );
+    this.bassFrontAge += safeDt;
+    this.dropFlash = this.smoothAR(this.dropFlash, 0, 24, 6.2, safeDt);
 
     const melodicDensity = this.clamp(
       this.smoothMid * 0.78 + this.smoothEnergy * 0.55,
@@ -280,15 +315,20 @@ export class EffectsService {
       1.15,
     );
 
-    this.musicFlow += safeDt * (0.2 + this.smoothEnergy * 0.28);
-    this.musicTexture += safeDt * (0.8 + this.smoothTreble * 0.9);
+    this.musicFlow +=
+      safeDt * (0.035 + this.smoothEnergy * 0.42 + this.dropFlash * 0.55);
+    this.musicTexture +=
+      safeDt * (0.32 + this.smoothTreble * 1.05 + this.dropFlash * 1.15);
 
     const travelSpan = ledCount + ledCount * 0.34;
     const travelHead = (this.musicFlow * ledCount * 0.62) % travelSpan;
     const baseCenter = travelHead - ledCount * 0.17;
-    const baseWidth = Math.max(ledCount * 0.09, ledCount * (0.11 + melodicDensity * 0.18));
-    const baseThickness = 0.18 + melodicDensity * 0.34;
-    const glowFloor = 0.018 + this.smoothEnergy * 0.06;
+    const baseWidth = Math.max(
+      ledCount * 0.07,
+      ledCount * (0.08 + melodicDensity * 0.21 + this.dropFlash * 0.05),
+    );
+    const baseThickness = 0.1 + melodicDensity * 0.42 + this.dropFlash * 0.16;
+    const glowFloor = 0.006 + this.smoothEnergy * 0.055;
 
     const pulseCenter = (ledCount - 1) * 0.5;
     const pulseRadius = this.pulseAge * ledCount * (0.85 + this.smoothKick * 0.55);
@@ -296,9 +336,28 @@ export class EffectsService {
     const pulseFade = Math.max(0, 1 - this.pulseAge * 1.9);
     const pulseCoreFade = Math.max(0, 1 - this.pulseAge * 4.6);
     const pulseCoreWidth = Math.max(1.8, ledCount * (0.035 + this.pulseStrength * 0.02));
-    const hueDrift = this.smoothMid * 18 + this.smoothTreble * 12 + transientPunch * 10;
+    void hueBase;
+
+    const sceneHueBase = 275;
+    const hueDrift =
+      this.smoothEnergy * -34 +
+      this.smoothMid * 48 +
+      this.smoothTreble * -18 +
+      transientPunch * 18 +
+      this.dropFlash * 28;
+    const bassFrontPosition =
+      this.bassFrontAge * ledCount * (1.35 + this.smoothKick * 0.85);
+    const bassFrontWidth = Math.max(
+      1.6,
+      ledCount * (0.018 + this.bassFrontStrength * 0.018),
+    );
+    const bassFrontFade = Math.max(0, 1 - this.bassFrontAge * 2.35);
     const brightnessMultiplier =
-      safeBrightness * (0.48 + this.smoothEnergy * 0.34 + this.beatFlash * 0.16);
+      safeBrightness *
+      (0.18 +
+        this.smoothEnergy * 0.62 +
+        this.beatFlash * 0.16 +
+        this.dropFlash * 0.28);
 
     for (let i = 0; i < ledCount; i++) {
       const distToBand = i - baseCenter;
@@ -327,20 +386,25 @@ export class EffectsService {
         pulseFade *
         this.pulseStrength *
         1.35;
+      const bassFront =
+        this.gaussian(i - bassFrontPosition, bassFrontWidth) *
+        bassFrontFade *
+        this.bassFrontStrength *
+        1.6;
 
       const sparkleSeed = this.fract(
         Math.sin(i * 12.9898 + this.musicTexture * 17.123 + this.musicFlow * 9.37) *
           43758.5453,
       );
-      const sparkleGate = 0.993 - trebleDust * 0.045;
+      const sparkleGate = 0.994 - trebleDust * 0.045 - this.dropFlash * 0.016;
       const sparkleBurst =
         sparkleSeed > sparkleGate
           ? Math.pow((sparkleSeed - sparkleGate) / (1 - sparkleGate), 2.7)
           : 0;
       const sparkle =
         sparkleBurst *
-        (0.18 + trebleDust * 0.85) *
-        (0.45 + leadingBand * 0.4 + this.beatFlash * 0.35);
+        (0.16 + trebleDust * 0.82 + this.dropFlash * 0.55) *
+        (0.45 + leadingBand * 0.38 + this.beatFlash * 0.28);
 
       const undertow =
         (Math.sin(i * 0.043 - this.musicFlow * 3.4) * 0.5 + 0.5) *
@@ -350,9 +414,11 @@ export class EffectsService {
         (baseWave +
           pulseCore +
           pulseShell +
+          bassFront +
           sparkle +
           undertow +
           transientPunch * 0.16 +
+          this.dropFlash * 0.12 +
           this.beatFlash * 0.05) *
         brightnessMultiplier;
 
@@ -361,14 +427,25 @@ export class EffectsService {
       value = Number.isFinite(value) ? value : 0;
 
       const hue =
-        (hueBase +
+        (sceneHueBase +
           hueDrift +
-          leadingBand * (8 + melodicDensity * 16) +
-          pulseShell * 12 +
-          sparkle * 28 +
+          leadingBand * (20 + melodicDensity * 26) -
+          trailingBand * 20 +
+          pulseShell * 28 +
+          bassFront * 46 +
+          sparkle * -82 +
           i * (0.05 + this.smoothTreble * 0.06)) %
         360;
-      writeHsvToRgb(pixels, i * 3, hue, 1, value);
+      const saturation = this.clamp(
+        0.88 -
+          sparkle * 0.8 -
+          this.dropFlash * 0.38 -
+          bassFront * 0.2 -
+          pulseCore * 0.22,
+        0.06,
+        1,
+      );
+      writeHsvToRgb(pixels, i * 3, hue, saturation, value);
     }
 
     return pixels;

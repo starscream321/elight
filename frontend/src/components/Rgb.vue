@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import AppSlider from "./AppSlider.vue";
-import {onMounted, ref, shallowRef, watch} from "vue";
+import {computed, onMounted, ref, shallowRef, watch} from "vue";
 import MainBtn from "./MainBtn.vue";
 import debounce from "../utils/debounce.ts";
 import ColorRing from "./ColorRing.vue";
@@ -14,6 +14,8 @@ const effects = shallowRef<EffectFrontend[]>([])
 const brightness = ref(0)
 const color = ref(0)
 const isLoading = ref(false)
+const activeEffect = computed(() => effects.value.find((effect) => effect.active))
+const isMusicActive = computed(() => activeEffect.value?.effect === 'music')
 
 const getBrightnessFromLocalStorage = () => {
   const storageBrightness = localStorage.getItem('rgb_brightness')
@@ -65,6 +67,7 @@ const debouncedSetBrightness = debounce(async (newBrightness: number) => {
 }, 200)
 
 const debouncedSetColor = debounce(async (newColor: number) => {
+  if (isMusicActive.value) return
   await setColor(newColor)
 }, 200)
 
@@ -84,15 +87,20 @@ watch(color, (newColor) => {
   <div
     class="rgb-container"
   >
-    <ColorRing
-      v-model="color"
-    />
+    <div
+      class="color-ring-shell"
+      :class="{ 'color-ring-shell_disabled': isMusicActive }"
+    >
+      <ColorRing
+        v-model="color"
+      />
+    </div>
     <div
       class="rgb-btn-container"
     >
       <MainBtn
           v-for="effect in effects"
-          @click="handleControl(effect.id, effect.effect, normalizeBrightness(brightness), color, effect.active)"
+          @click="handleControl(effect.id, effect.effect, normalizeBrightness(brightness), effect.effect === 'music' ? undefined : color, effect.active)"
           :key="effect.id"
           :name="effect.name"
           :icon="effect.icon"
@@ -120,5 +128,15 @@ watch(color, (newColor) => {
   grid-template-columns: repeat(3, 183px);
   grid-auto-rows: 120px;
   gap: 8px;
+}
+
+.color-ring-shell {
+  transition: opacity 0.2s ease, filter 0.2s ease;
+}
+
+.color-ring-shell_disabled {
+  opacity: 0.35;
+  filter: grayscale(1);
+  pointer-events: none;
 }
 </style>
