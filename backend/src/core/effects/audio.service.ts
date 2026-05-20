@@ -13,6 +13,7 @@ const DEFAULT_CHANNELS = 2;
 const AUTO_DEVICE_VALUE = 'auto';
 const LEGACY_WINDOWS_AUDIO_DEVICE = 'CABLE Output (VB-Audio Virtual Cable)';
 const DEFAULT_AUTO_MIN_RMS = 0.002;
+const DEFAULT_DEBUG_INTERVAL_MS = 1000;
 
 export interface AudioFeatures {
   kick: number;
@@ -44,6 +45,12 @@ export class AudioService implements OnModuleDestroy {
   private started = false;
   private audioProcess?: ChildProcessWithoutNullStreams;
   private readonly audioChannels: number;
+  private readonly debugEnabled: boolean;
+  private readonly debugIntervalMs: number;
+  private inputDebugSumSquares = 0;
+  private inputDebugPeak = 0;
+  private inputDebugSamples = 0;
+  private lastDebugAt = 0;
 
   private smoothed = {
     kick: 0,
@@ -68,6 +75,8 @@ export class AudioService implements OnModuleDestroy {
 
   constructor(private readonly config: ConfigService) {
     this.audioChannels = this.getAudioChannels();
+    this.debugEnabled = this.getBooleanConfig('AUDIO_DEBUG');
+    this.debugIntervalMs = this.getDebugIntervalMs();
   }
 
   onModuleDestroy() {
@@ -142,7 +151,7 @@ export class AudioService implements OnModuleDestroy {
 
     const beat = this.detectBeatFromLowEnergy(kickRaw, bassRaw);
 
-    return {
+    const features = {
       kick: this.smoothed.kick,
       bass: this.smoothed.bass,
       mid: this.smoothed.mid,
@@ -150,6 +159,10 @@ export class AudioService implements OnModuleDestroy {
       energy,
       beat,
     };
+
+    this.logDebug(features);
+
+    return features;
   }
 
   private start() {
@@ -428,13 +441,28 @@ export class AudioService implements OnModuleDestroy {
       : DEFAULT_CHANNELS;
   }
 
+  private getDebugIntervalMs() {
+    const configured = Number(this.config.get('AUDIO_DEBUG_INTERVAL_MS'));
+    return Number.isInteger(configured) && configured > 0
+      ? configured
+      : DEFAULT_DEBUG_INTERVAL_MS;
+  }
+
+  private getBooleanConfig(key: string) {
+    const value = this.config.get<string | boolean>(key);
+    if (typeof value === 'boolean') return value;
+    return ['1', 'true', 'yes', 'on'].includes(String(value).toLowerCase());
+  }
+
   private handleChunk(buf: Buffer) {
     const { type, data } = this.parseChunk(buf);
     if (!data) return;
 
     const mono = this.toMono(data, this.audioChannels, type);
     for (let i = 0; i < mono.length; i++) {
-      this.audioMono[this.audioWriteIndex] = this.conditionInputSample(mono[i]);
+      const sample = this.conditionInputSample(mono[i]);
+      this.collectInputDebug(sample);
+      this.audioMono[this.audioWriteIndex] = sample;
       this.audioWriteIndex = (this.audioWriteIndex + 1) % FFT_SIZE;
     }
     this.audioSamplesSeen += mono.length;
@@ -524,6 +552,46 @@ export class AudioService implements OnModuleDestroy {
     this.dcBlockY = filtered;
 
     return this.clamp(filtered, -1, 1);
+  }
+
+  private collectInputDebug(sample: number) {
+    if (!this.debugEnabled) return;
+
+    const abs = Math.abs(sample);
+    this.inputDebugPeak = Math.max(this.inputDebugPeak, abs);
+    this.inputDebugSumSquares += sample * sample;
+    this.inputDebugSamples++;
+  }
+
+  private logDebug(features: AudioFeatures) {
+    if (!this.debugEnabled) return;
+
+    const now = Date.now();
+    if (now - this.lastDebugAt < this.debugIntervalMs) return;
+    this.lastDebugAt = now;
+
+    const inputRms =
+      this.inputDebugSamples > 0
+        ? Math.sqrt(this.inputDebugSumSquares / this.inputDebugSamples)
+        : 0;
+
+    this.logger.log(
+      [
+        'Audio debug',
+        `inRms=${inputRms.toFixed(4)}`,
+        `inPeak=${this.inputDebugPeak.toFixed(4)}`,
+        `kick=${features.kick.toFixed(3)}`,
+        `bass=${features.bass.toFixed(3)}`,
+        `mid=${features.mid.toFixed(3)}`,
+        `treble=${features.treble.toFixed(3)}`,
+        `energy=${features.energy.toFixed(3)}`,
+        `beat=${features.beat ? 'yes' : 'no'}`,
+      ].join(' | '),
+    );
+
+    this.inputDebugSumSquares = 0;
+    this.inputDebugPeak = 0;
+    this.inputDebugSamples = 0;
   }
 
   private detectBeatFromLowEnergy(kickRaw: number, bassRaw: number) {
