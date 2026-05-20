@@ -234,26 +234,26 @@ export class EffectsService {
       this.smoothKick / (this.smoothBass * 0.6 + this.smoothMid * 0.3 + 0.3);
 
     const kickAmp =
-      Math.pow(this.smoothKick, 0.9) * 2.7 * (1 + kickIsolation * 0.25);
-    const bassAmp = Math.pow(this.smoothBass, 0.75) * 1.8;
-    const midAmp = Math.pow(this.smoothMid, 0.7) * 1.15;
-    const trebleAmp = Math.pow(this.smoothTreble, 0.65) * 0.85;
+      Math.pow(this.smoothKick, 0.95) * 1.85 * (1 + kickIsolation * 0.2);
+    const bassAmp = Math.pow(this.smoothBass, 0.8) * 1.1;
+    const midAmp = Math.pow(this.smoothMid, 0.75) * 0.65;
+    const trebleAmp = Math.pow(this.smoothTreble, 0.7) * 0.55;
 
     const kickDelta = Math.max(0, this.smoothKick - this.previousKick);
     this.previousKick = this.smoothKick;
 
     const transientPunch =
-      Math.pow(kickDelta, 0.78) * 2.8 * (1 + kickIsolation * 0.25);
+      Math.pow(kickDelta, 0.76) * 3.8 * (1 + kickIsolation * 0.25);
 
     if (spectrum.beat) {
       this.beatFlash = 1;
-      this.beatBurst = Math.min(1.4, this.beatBurst + 0.85);
+      this.beatBurst = Math.min(1.6, this.beatBurst + 1.05);
     }
-    this.beatFlash = this.smoothAR(this.beatFlash, 0, 12, 12, safeDt);
-    this.beatBurst = this.smoothAR(this.beatBurst, 0, 16, 9, safeDt);
+    this.beatFlash = this.smoothAR(this.beatFlash, 0, 18, 18, safeDt);
+    this.beatBurst = this.smoothAR(this.beatBurst, 0, 22, 13, safeDt);
 
-    const energyBoost = 0.6 + this.smoothEnergy * 0.95;
-    const beatBoost = 1 + this.beatFlash * 1.15 + this.beatBurst * 0.35;
+    const energyBoost = 0.32 + this.smoothEnergy * 0.55;
+    const beatBoost = 1 + this.beatFlash * 1.55 + this.beatBurst * 0.65;
 
     const speedKick = 2.2 + this.smoothEnergy * 1.0;
     const speedBass = 1.6 + this.smoothEnergy * 0.8;
@@ -279,7 +279,7 @@ export class EffectsService {
     const brightnessMultiplier = safeBrightness * energyBoost * beatBoost;
     const beatCenter =
       (this.phaseKick * 17 + this.beatBurst * ledCount * 0.11) % ledCount;
-    const beatWidth = Math.max(5, ledCount * (0.045 + this.beatBurst * 0.055));
+    const beatWidth = Math.max(3, ledCount * (0.022 + this.beatBurst * 0.035));
     const bassSweep = this.phaseBass * ledCount * 0.18;
 
     for (let i = 0; i < ledCount; i++) {
@@ -289,7 +289,7 @@ export class EffectsService {
       );
       const beatPulse =
         Math.max(0, 1 - beatDistance / beatWidth) *
-        (this.beatBurst * 1.45 + transientPunch * 0.4);
+        (this.beatBurst * 2.4 + transientPunch * 0.85);
       const kickWave =
         (Math.sin(i * 0.04 + phaseKickOffset) * 0.5 + 0.5) * kickAmp;
       const bassWave =
@@ -309,21 +309,21 @@ export class EffectsService {
           9,
         ) *
         this.smoothTreble *
-        (0.25 + this.beatFlash);
+        (0.08 + this.beatFlash * 0.75);
       const texture =
-        Math.sin(i * 0.31 + phaseMidOffset + this.smoothEnergy * 4) * 0.08 +
-        Math.sin(i * 0.73 - phaseTrebleOffset) * 0.045;
+        Math.sin(i * 0.31 + phaseMidOffset + this.smoothEnergy * 4) * 0.025 +
+        Math.sin(i * 0.73 - phaseTrebleOffset) * 0.018;
 
       let value =
-        (kickWave * 0.52 +
-          bassWave * 0.2 +
-          bassRibbon * 0.35 +
-          midWave * 0.16 +
-          trebleWave * 0.1 +
-          trebleSpark * 0.5 +
-          beatPulse * 0.75 +
-          this.beatFlash * 0.28 +
-          transientPunch * 0.28 +
+        (kickWave * 0.24 +
+          bassWave * 0.09 +
+          bassRibbon * 0.14 +
+          midWave * 0.06 +
+          trebleWave * 0.04 +
+          trebleSpark * 0.22 +
+          beatPulse * 1.45 +
+          this.beatFlash * 0.18 +
+          transientPunch * 0.55 +
           texture) *
         brightnessMultiplier;
 
@@ -335,9 +335,9 @@ export class EffectsService {
         (hueBase +
           i * (0.28 + this.smoothTreble * 0.25) +
           hueBeatShift +
-          bassRibbon * 34 +
-          midWave * 14 -
-          beatPulse * 28) %
+          bassRibbon * 18 +
+          midWave * 8 -
+          beatPulse * 42) %
         360;
       writeHsvToRgb(pixels, i * 3, hue, 1, value);
     }
