@@ -14,6 +14,9 @@ const AUTO_DEVICE_VALUE = 'auto';
 const LEGACY_WINDOWS_AUDIO_DEVICE = 'CABLE Output (VB-Audio Virtual Cable)';
 const DEFAULT_AUTO_MIN_RMS = 0.002;
 const DEFAULT_DEBUG_INTERVAL_MS = 1000;
+const ENVELOPE_BEAT_THRESHOLD = 0.024;
+const ENVELOPE_BEAT_RATIO = 1.32;
+const ENVELOPE_BEAT_COOLDOWN_SAMPLES = Math.round(SAMPLE_RATE * 0.115);
 
 export interface AudioFeatures {
   kick: number;
@@ -71,7 +74,11 @@ export class AudioService implements OnModuleDestroy {
   private beatCooldown = 0;
   private lowEnergyHistoryIndex = 0;
   private lowEnergyHistoryCount = 0;
-  private readonly lowEnergyHistory = new Float32Array(48);
+  private readonly lowEnergyHistory = new Float32Array(32);
+  private inputEnvelopeFast = 0;
+  private inputEnvelopeSlow = 0;
+  private envelopeBeatCooldownSamples = 0;
+  private pendingEnvelopeBeat = false;
 
   constructor(private readonly config: ConfigService) {
     this.audioChannels = this.getAudioChannels();
@@ -103,18 +110,18 @@ export class AudioService implements OnModuleDestroy {
     const bin = SAMPLE_RATE / FFT_SIZE;
     const idx = (hz: number) => Math.min(mags.length - 1, Math.round(hz / bin));
 
-    const kickRaw = this.safeAvgRange(mags, idx(60), idx(150));
-    const bassRaw = this.safeAvgRange(mags, idx(150), idx(300));
-    const midRaw = this.safeAvgRange(mags, idx(300), idx(2000));
-    const trebleRaw = this.safeAvgRange(mags, idx(2000), idx(6000));
+    const kickRaw = this.safeAvgRange(mags, idx(45), idx(135));
+    const bassRaw = this.safeAvgRange(mags, idx(90), idx(260));
+    const midRaw = this.safeAvgRange(mags, idx(260), idx(1800));
+    const trebleRaw = this.safeAvgRange(mags, idx(1800), idx(7000));
 
-    this.peak.kick = Math.max(this.peak.kick * 0.995, kickRaw);
-    this.peak.bass = Math.max(this.peak.bass * 0.995, bassRaw);
-    this.peak.mid = Math.max(this.peak.mid * 0.995, midRaw);
-    this.peak.treble = Math.max(this.peak.treble * 0.995, trebleRaw);
+    this.peak.kick = Math.max(this.peak.kick * 0.988, kickRaw);
+    this.peak.bass = Math.max(this.peak.bass * 0.99, bassRaw);
+    this.peak.mid = Math.max(this.peak.mid * 0.992, midRaw);
+    this.peak.treble = Math.max(this.peak.treble * 0.992, trebleRaw);
 
-    const kickNorm = this.noiseGate(kickRaw / this.peak.kick, 0.035);
-    const bassNorm = this.noiseGate(bassRaw / this.peak.bass, 0.045);
+    const kickNorm = this.noiseGate(kickRaw / this.peak.kick, 0.025);
+    const bassNorm = this.noiseGate(bassRaw / this.peak.bass, 0.035);
     const midNorm = this.noiseGate(midRaw / this.peak.mid, 0.04);
     const trebleNorm = this.noiseGate(trebleRaw / this.peak.treble, 0.03);
 
@@ -149,7 +156,9 @@ export class AudioService implements OnModuleDestroy {
       this.smoothed.mid * 0.15 +
       this.smoothed.treble * 0.05;
 
-    const beat = this.detectBeatFromLowEnergy(kickRaw, bassRaw);
+    const beat =
+      this.detectBeatFromLowEnergy(kickRaw, bassRaw) ||
+      this.consumeEnvelopeBeat();
 
     const features = {
       kick: this.smoothed.kick,
@@ -461,6 +470,7 @@ export class AudioService implements OnModuleDestroy {
     const mono = this.toMono(data, this.audioChannels, type);
     for (let i = 0; i < mono.length; i++) {
       const sample = this.conditionInputSample(mono[i]);
+      this.detectEnvelopeBeat(sample);
       this.collectInputDebug(sample);
       this.audioMono[this.audioWriteIndex] = sample;
       this.audioWriteIndex = (this.audioWriteIndex + 1) % FFT_SIZE;
@@ -563,6 +573,33 @@ export class AudioService implements OnModuleDestroy {
     this.inputDebugSamples++;
   }
 
+  private detectEnvelopeBeat(sample: number) {
+    const level = Math.abs(sample);
+
+    this.inputEnvelopeFast += (level - this.inputEnvelopeFast) * 0.18;
+    this.inputEnvelopeSlow += (level - this.inputEnvelopeSlow) * 0.012;
+
+    if (this.envelopeBeatCooldownSamples > 0) {
+      this.envelopeBeatCooldownSamples--;
+      return;
+    }
+
+    const ratio = this.inputEnvelopeFast / (this.inputEnvelopeSlow + 1e-4);
+    if (
+      this.inputEnvelopeFast > ENVELOPE_BEAT_THRESHOLD &&
+      ratio > ENVELOPE_BEAT_RATIO
+    ) {
+      this.pendingEnvelopeBeat = true;
+      this.envelopeBeatCooldownSamples = ENVELOPE_BEAT_COOLDOWN_SAMPLES;
+    }
+  }
+
+  private consumeEnvelopeBeat() {
+    const beat = this.pendingEnvelopeBeat;
+    this.pendingEnvelopeBeat = false;
+    return beat;
+  }
+
   private logDebug(features: AudioFeatures) {
     if (!this.debugEnabled) return;
 
@@ -603,15 +640,15 @@ export class AudioService implements OnModuleDestroy {
     if (this.beatCooldown > 0) this.beatCooldown--;
     if (this.lowEnergyHistoryCount < 16) return false;
 
-    const dynamicFloor = stats.mean + stats.stdDev * 0.55 + 1e-6;
+    const dynamicFloor = stats.mean + stats.stdDev * 0.45 + 1e-6;
     const transient = lowEnergy - stats.mean;
     const ratio = lowEnergy / dynamicFloor;
 
     const beat =
-      transient > stats.stdDev * 1.35 &&
-      ratio > 1.24 &&
+      transient > stats.stdDev * 1.05 &&
+      ratio > 1.15 &&
       this.beatCooldown === 0;
-    if (beat) this.beatCooldown = 7;
+    if (beat) this.beatCooldown = 5;
 
     return beat;
   }

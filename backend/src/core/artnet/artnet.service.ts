@@ -7,51 +7,55 @@ const PACKET_SIZE = 18 + DMX_SIZE;
 
 @Injectable()
 export class ArtnetService {
-    private socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+  private socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 
-    private packet = Buffer.alloc(PACKET_SIZE);
-    private sequence = 1;
+  private header = Buffer.alloc(PACKET_SIZE);
+  private sequence = 1;
 
-    constructor() {
-        this.packet[0] = 0x41;
-        this.packet[1] = 0x72;
-        this.packet[2] = 0x74;
-        this.packet[3] = 0x2D;
-        this.packet[4] = 0x4E;
-        this.packet[5] = 0x65;
-        this.packet[6] = 0x74;
-        this.packet[7] = 0x00;
+  constructor() {
+    this.header[0] = 0x41;
+    this.header[1] = 0x72;
+    this.header[2] = 0x74;
+    this.header[3] = 0x2d;
+    this.header[4] = 0x4e;
+    this.header[5] = 0x65;
+    this.header[6] = 0x74;
+    this.header[7] = 0x00;
 
-        this.packet[8] = 0x00;
-        this.packet[9] = 0x50;
+    this.header[8] = 0x00;
+    this.header[9] = 0x50;
 
-        this.packet[10] = 0x00;
-        this.packet[11] = 0x0E;
+    this.header[10] = 0x00;
+    this.header[11] = 0x0e;
 
-        this.packet[12] = 0x01;
-        this.packet[13] = 0x00;
+    this.header[12] = 0x01;
+    this.header[13] = 0x00;
 
-        this.packet[16] = (DMX_SIZE >> 8) & 0xff;
-        this.packet[17] = DMX_SIZE & 0xff;
-    }
+    this.header[16] = (DMX_SIZE >> 8) & 0xff;
+    this.header[17] = DMX_SIZE & 0xff;
+  }
 
-    async sendPacket(dmx: Uint8Array, universe: number, ip: string): Promise<void> {
-        this.packet[12] = this.sequence;
-        this.sequence = (this.sequence + 1) & 0xff;
-        if (this.sequence === 0) this.sequence = 1;
+  async sendPacket(
+    dmx: Uint8Array,
+    universe: number,
+    ip: string,
+  ): Promise<void> {
+    const packet = Buffer.from(this.header);
 
-        this.packet[14] = universe & 0xff;
-        this.packet[15] = (universe >> 8) & 0xff;
+    packet[12] = this.sequence;
+    this.sequence = (this.sequence + 1) & 0xff;
+    if (this.sequence === 0) this.sequence = 1;
 
-        this.packet.fill(0, 18);
-        this.packet.set(dmx.subarray(0, DMX_SIZE), 18);
+    packet[14] = universe & 0xff;
+    packet[15] = (universe >> 8) & 0xff;
 
-        return new Promise((resolve, reject) => {
-            this.socket.send(this.packet, ARTNET_PORT, ip, (err) => {
-                if (err) reject(err);
-                else resolve();
-            });
-        });
-    }
+    packet.set(dmx.subarray(0, DMX_SIZE), 18);
+
+    return new Promise((resolve, reject) => {
+      this.socket.send(packet, ARTNET_PORT, ip, (err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+  }
 }
-
