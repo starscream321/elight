@@ -59,9 +59,12 @@ export class AudioService implements OnModuleDestroy {
     treble: 1e-3,
   };
 
-  private beatHold = 4;
-  private kickFast = 0;
-  private kickSlow = 0;
+  private dcBlockX = 0;
+  private dcBlockY = 0;
+  private beatCooldown = 0;
+  private lowEnergyHistoryIndex = 0;
+  private lowEnergyHistoryCount = 0;
+  private readonly lowEnergyHistory = new Float32Array(48);
 
   constructor(private readonly config: ConfigService) {
     this.audioChannels = this.getAudioChannels();
@@ -137,13 +140,15 @@ export class AudioService implements OnModuleDestroy {
       this.smoothed.mid * 0.15 +
       this.smoothed.treble * 0.05;
 
+    const beat = this.detectBeatFromLowEnergy(kickRaw, bassRaw);
+
     return {
       kick: this.smoothed.kick,
       bass: this.smoothed.bass,
       mid: this.smoothed.mid,
       treble: this.smoothed.treble,
       energy,
-      beat: this.detectBeatFromTransient(kickNorm, bassNorm),
+      beat,
     };
   }
 
@@ -429,7 +434,7 @@ export class AudioService implements OnModuleDestroy {
 
     const mono = this.toMono(data, this.audioChannels, type);
     for (let i = 0; i < mono.length; i++) {
-      this.audioMono[this.audioWriteIndex] = mono[i];
+      this.audioMono[this.audioWriteIndex] = this.conditionInputSample(mono[i]);
       this.audioWriteIndex = (this.audioWriteIndex + 1) % FFT_SIZE;
     }
     this.audioSamplesSeen += mono.length;
@@ -511,23 +516,69 @@ export class AudioService implements OnModuleDestroy {
     return value > threshold ? (value - threshold) / (1 - threshold) : 0;
   }
 
-  private detectBeatFromTransient(kickNorm: number, bassNorm: number) {
-    const beatHold = 6;
+  private conditionInputSample(sample: number) {
+    const clipped = this.clamp(sample, -0.98, 0.98);
+    const filtered = clipped - this.dcBlockX + 0.995 * this.dcBlockY;
 
-    this.kickFast = this.smoothValue(kickNorm, this.kickFast, 0.6, 0.3);
-    this.kickSlow = this.smoothValue(kickNorm, this.kickSlow, 0.15, 0.05);
+    this.dcBlockX = clipped;
+    this.dcBlockY = filtered;
 
-    const transient = Math.max(0, this.kickFast - this.kickSlow * 0.9);
-    const score = Math.max(0, transient - bassNorm * 0.4);
+    return this.clamp(filtered, -1, 1);
+  }
 
-    let beat = false;
-    if (score > 0.1 && this.beatHold === 0) {
-      beat = true;
-      this.beatHold = beatHold;
+  private detectBeatFromLowEnergy(kickRaw: number, bassRaw: number) {
+    const lowEnergy = kickRaw * 0.72 + bassRaw * 0.28;
+    const stats = this.getLowEnergyStats();
+
+    this.pushLowEnergy(lowEnergy);
+
+    if (this.beatCooldown > 0) this.beatCooldown--;
+    if (this.lowEnergyHistoryCount < 16) return false;
+
+    const dynamicFloor = stats.mean + stats.stdDev * 0.55 + 1e-6;
+    const transient = lowEnergy - stats.mean;
+    const ratio = lowEnergy / dynamicFloor;
+
+    const beat =
+      transient > stats.stdDev * 1.35 &&
+      ratio > 1.24 &&
+      this.beatCooldown === 0;
+    if (beat) this.beatCooldown = 7;
+
+    return beat;
+  }
+
+  private getLowEnergyStats() {
+    const count = this.lowEnergyHistoryCount;
+    if (count === 0) return { mean: 0, stdDev: 0 };
+
+    let sum = 0;
+    for (let i = 0; i < count; i++) {
+      sum += this.lowEnergyHistory[i];
     }
 
-    if (this.beatHold > 0) this.beatHold--;
-    return beat;
+    const mean = sum / count;
+    let variance = 0;
+    for (let i = 0; i < count; i++) {
+      const diff = this.lowEnergyHistory[i] - mean;
+      variance += diff * diff;
+    }
+
+    return { mean, stdDev: Math.sqrt(variance / count) };
+  }
+
+  private pushLowEnergy(value: number) {
+    this.lowEnergyHistory[this.lowEnergyHistoryIndex] = value;
+    this.lowEnergyHistoryIndex =
+      (this.lowEnergyHistoryIndex + 1) % this.lowEnergyHistory.length;
+    this.lowEnergyHistoryCount = Math.min(
+      this.lowEnergyHistoryCount + 1,
+      this.lowEnergyHistory.length,
+    );
+  }
+
+  private clamp(value: number, min: number, max: number) {
+    return Math.max(min, Math.min(max, value));
   }
 
   private emptyFeatures(): AudioFeatures {
