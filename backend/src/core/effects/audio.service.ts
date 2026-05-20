@@ -14,6 +14,7 @@ const AUTO_DEVICE_VALUE = 'auto';
 const LEGACY_WINDOWS_AUDIO_DEVICE = 'CABLE Output (VB-Audio Virtual Cable)';
 const DEFAULT_AUTO_MIN_RMS = 0.002;
 const DEFAULT_DEBUG_INTERVAL_MS = 1000;
+const DEFAULT_NOISE_FLOOR_RMS = 0.006;
 const ENVELOPE_BEAT_THRESHOLD = 0.04;
 const ENVELOPE_BEAT_RATIO = 1.7;
 const ENVELOPE_BEAT_COOLDOWN_SAMPLES = Math.round(SAMPLE_RATE * 0.17);
@@ -50,9 +51,12 @@ export class AudioService implements OnModuleDestroy {
   private readonly audioChannels: number;
   private readonly debugEnabled: boolean;
   private readonly debugIntervalMs: number;
+  private readonly noiseFloorRms: number;
   private inputDebugSumSquares = 0;
   private inputDebugPeak = 0;
   private inputDebugSamples = 0;
+  private inputRmsSumSquares = 0;
+  private inputRmsSamples = 0;
   private lastDebugAt = 0;
 
   private smoothed = {
@@ -91,6 +95,7 @@ export class AudioService implements OnModuleDestroy {
     this.audioChannels = this.getAudioChannels();
     this.debugEnabled = this.getBooleanConfig('AUDIO_DEBUG');
     this.debugIntervalMs = this.getDebugIntervalMs();
+    this.noiseFloorRms = this.getNoiseFloorRms();
   }
 
   onModuleDestroy() {
@@ -102,6 +107,14 @@ export class AudioService implements OnModuleDestroy {
 
     if (this.audioSamplesSeen < FFT_SIZE) {
       return this.emptyFeatures();
+    }
+
+    const currentInputRms = this.consumeInputRms();
+    if (currentInputRms < this.noiseFloorRms) {
+      const features = this.emptyFeatures();
+      this.resetAudioAnalysisState();
+      this.logDebug(features, currentInputRms);
+      return features;
     }
 
     for (let i = 0; i < FFT_SIZE; i++) {
@@ -188,7 +201,7 @@ export class AudioService implements OnModuleDestroy {
       beat,
     };
 
-    this.logDebug(features);
+    this.logDebug(features, currentInputRms);
 
     return features;
   }
@@ -476,6 +489,13 @@ export class AudioService implements OnModuleDestroy {
       : DEFAULT_DEBUG_INTERVAL_MS;
   }
 
+  private getNoiseFloorRms() {
+    const configured = Number(this.config.get('AUDIO_NOISE_FLOOR_RMS'));
+    return Number.isFinite(configured) && configured >= 0
+      ? configured
+      : DEFAULT_NOISE_FLOOR_RMS;
+  }
+
   private getBooleanConfig(key: string) {
     const value = this.config.get<string | boolean>(key);
     if (typeof value === 'boolean') return value;
@@ -490,6 +510,7 @@ export class AudioService implements OnModuleDestroy {
     for (let i = 0; i < mono.length; i++) {
       const sample = this.conditionInputSample(mono[i]);
       this.detectEnvelopeBeat(sample);
+      this.collectInputRms(sample);
       this.collectInputDebug(sample);
       this.audioMono[this.audioWriteIndex] = sample;
       this.audioWriteIndex = (this.audioWriteIndex + 1) % FFT_SIZE;
@@ -626,6 +647,20 @@ export class AudioService implements OnModuleDestroy {
     this.inputDebugSamples++;
   }
 
+  private collectInputRms(sample: number) {
+    this.inputRmsSumSquares += sample * sample;
+    this.inputRmsSamples++;
+  }
+
+  private consumeInputRms() {
+    if (this.inputRmsSamples === 0) return 0;
+
+    const rms = Math.sqrt(this.inputRmsSumSquares / this.inputRmsSamples);
+    this.inputRmsSumSquares = 0;
+    this.inputRmsSamples = 0;
+    return rms;
+  }
+
   private detectEnvelopeBeat(sample: number) {
     const level = Math.abs(sample);
 
@@ -653,23 +688,25 @@ export class AudioService implements OnModuleDestroy {
     return beat;
   }
 
-  private logDebug(features: AudioFeatures) {
+  private logDebug(features: AudioFeatures, inputRms?: number) {
     if (!this.debugEnabled) return;
 
     const now = Date.now();
     if (now - this.lastDebugAt < this.debugIntervalMs) return;
     this.lastDebugAt = now;
 
-    const inputRms =
-      this.inputDebugSamples > 0
+    const debugInputRms =
+      inputRms ??
+      (this.inputDebugSamples > 0
         ? Math.sqrt(this.inputDebugSumSquares / this.inputDebugSamples)
-        : 0;
+        : 0);
 
     this.logger.log(
       [
         'Audio debug',
-        `inRms=${inputRms.toFixed(4)}`,
+        `inRms=${debugInputRms.toFixed(4)}`,
         `inPeak=${this.inputDebugPeak.toFixed(4)}`,
+        `noiseFloor=${this.noiseFloorRms.toFixed(4)}`,
         `kick=${features.kick.toFixed(3)}`,
         `bass=${features.bass.toFixed(3)}`,
         `mid=${features.mid.toFixed(3)}`,
@@ -682,6 +719,16 @@ export class AudioService implements OnModuleDestroy {
     this.inputDebugSumSquares = 0;
     this.inputDebugPeak = 0;
     this.inputDebugSamples = 0;
+  }
+
+  private resetAudioAnalysisState() {
+    this.smoothed.kick = this.smoothValue(0, this.smoothed.kick, 0.2, 0.2);
+    this.smoothed.bass = this.smoothValue(0, this.smoothed.bass, 0.2, 0.2);
+    this.smoothed.mid = this.smoothValue(0, this.smoothed.mid, 0.2, 0.2);
+    this.smoothed.treble = this.smoothValue(0, this.smoothed.treble, 0.2, 0.2);
+    this.pendingEnvelopeBeat = false;
+    this.inputEnvelopeFast = 0;
+    this.inputEnvelopeSlow = 0;
   }
 
   private detectBeatFromLowEnergy(kickRaw: number, bassRaw: number) {
