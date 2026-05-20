@@ -40,6 +40,7 @@ export class EffectsService {
   private readonly SPEED_SMOOTH_FADE = 1.0;
 
   private beatFlash = 0;
+  private beatBurst = 0;
   private previousKick = 0;
 
   private lastMusicTimeSec: number | null = null;
@@ -57,6 +58,7 @@ export class EffectsService {
 
   public resetState(): void {
     this.beatFlash = 0;
+    this.beatBurst = 0;
     this.previousKick = 0;
     this.lastMusicTimeSec = null;
     this.phaseKick = 0;
@@ -243,11 +245,15 @@ export class EffectsService {
     const transientPunch =
       Math.pow(kickDelta, 0.78) * 2.8 * (1 + kickIsolation * 0.25);
 
-    if (spectrum.beat) this.beatFlash = 1;
+    if (spectrum.beat) {
+      this.beatFlash = 1;
+      this.beatBurst = Math.min(1.4, this.beatBurst + 0.85);
+    }
     this.beatFlash = this.smoothAR(this.beatFlash, 0, 12, 12, safeDt);
+    this.beatBurst = this.smoothAR(this.beatBurst, 0, 16, 9, safeDt);
 
-    const energyBoost = 0.55 + this.smoothEnergy * 0.75;
-    const beatBoost = 1 + this.beatFlash * 0.95;
+    const energyBoost = 0.6 + this.smoothEnergy * 0.95;
+    const beatBoost = 1 + this.beatFlash * 1.15 + this.beatBurst * 0.35;
 
     const speedKick = 2.2 + this.smoothEnergy * 1.0;
     const speedBass = 1.6 + this.smoothEnergy * 0.8;
@@ -259,7 +265,11 @@ export class EffectsService {
     this.phaseMid += safeDt * speedMid;
     this.phaseTreble += safeDt * speedTreble;
 
-    const hueBeatShift = this.beatFlash * 22 + transientPunch * 18;
+    const hueBeatShift =
+      this.beatFlash * 30 +
+      this.beatBurst * 18 +
+      transientPunch * 24 +
+      this.smoothMid * 16;
 
     // Pre-calculate constant values outside the loop
     const phaseKickOffset = this.phaseKick * 6.2;
@@ -267,31 +277,68 @@ export class EffectsService {
     const phaseMidOffset = this.phaseMid * 4.1;
     const phaseTrebleOffset = this.phaseTreble * 3.2;
     const brightnessMultiplier = safeBrightness * energyBoost * beatBoost;
+    const beatCenter =
+      (this.phaseKick * 17 + this.beatBurst * ledCount * 0.11) % ledCount;
+    const beatWidth = Math.max(5, ledCount * (0.045 + this.beatBurst * 0.055));
+    const bassSweep = this.phaseBass * ledCount * 0.18;
 
     for (let i = 0; i < ledCount; i++) {
+      const beatDistance = Math.min(
+        Math.abs(i - beatCenter),
+        ledCount - Math.abs(i - beatCenter),
+      );
+      const beatPulse =
+        Math.max(0, 1 - beatDistance / beatWidth) *
+        (this.beatBurst * 1.45 + transientPunch * 0.4);
       const kickWave =
         (Math.sin(i * 0.04 + phaseKickOffset) * 0.5 + 0.5) * kickAmp;
       const bassWave =
         (Math.sin(i * 0.052 + phaseBassOffset) * 0.5 + 0.5) * bassAmp;
       const midWave =
-        (Math.sin(i * 0.09 + phaseMidOffset) * 0.5 + 0.5) * midAmp;
+        Math.pow(Math.sin(i * 0.09 + phaseMidOffset) * 0.5 + 0.5, 1.4) * midAmp;
       const trebleWave =
-        (Math.sin(i * 0.13 + phaseTrebleOffset) * 0.5 + 0.5) * trebleAmp;
+        Math.pow(Math.sin(i * 0.17 + phaseTrebleOffset) * 0.5 + 0.5, 3.2) *
+        trebleAmp;
+      const bassRibbon =
+        Math.pow(Math.sin(i * 0.021 - bassSweep) * 0.5 + 0.5, 2.1) *
+        this.smoothBass;
+      const trebleSpark =
+        Math.pow(
+          Math.sin(i * 1.73 + phaseTrebleOffset * 2.7 + this.phaseMid) * 0.5 +
+            0.5,
+          9,
+        ) *
+        this.smoothTreble *
+        (0.25 + this.beatFlash);
+      const texture =
+        Math.sin(i * 0.31 + phaseMidOffset + this.smoothEnergy * 4) * 0.08 +
+        Math.sin(i * 0.73 - phaseTrebleOffset) * 0.045;
 
       let value =
         (kickWave * 0.52 +
-          bassWave * 0.28 +
-          midWave * 0.14 +
-          trebleWave * 0.06 +
-          this.beatFlash * 0.55 +
-          transientPunch * 0.35) *
+          bassWave * 0.2 +
+          bassRibbon * 0.35 +
+          midWave * 0.16 +
+          trebleWave * 0.1 +
+          trebleSpark * 0.5 +
+          beatPulse * 0.75 +
+          this.beatFlash * 0.28 +
+          transientPunch * 0.28 +
+          texture) *
         brightnessMultiplier;
 
       value = this.softClip(value);
       value = this.clamp(value, 0, 1);
       value = Number.isFinite(value) ? value : 0;
 
-      const hue = (hueBase + i * 0.38 + hueBeatShift) % 360;
+      const hue =
+        (hueBase +
+          i * (0.28 + this.smoothTreble * 0.25) +
+          hueBeatShift +
+          bassRibbon * 34 +
+          midWave * 14 -
+          beatPulse * 28) %
+        360;
       writeHsvToRgb(pixels, i * 3, hue, 1, value);
     }
 
