@@ -9,7 +9,7 @@ import { fft as FFT } from 'fft-js';
 
 const SAMPLE_RATE = 44100;
 const FFT_SIZE = 1024;
-const CHANNELS = 2;
+const DEFAULT_CHANNELS = 2;
 const AUTO_DEVICE_VALUE = 'auto';
 const LEGACY_WINDOWS_AUDIO_DEVICE = 'CABLE Output (VB-Audio Virtual Cable)';
 const DEFAULT_AUTO_MIN_RMS = 0.002;
@@ -43,6 +43,7 @@ export class AudioService implements OnModuleDestroy {
   private audioSamplesSeen = 0;
   private started = false;
   private audioProcess?: ChildProcessWithoutNullStreams;
+  private readonly audioChannels = this.getAudioChannels();
 
   private smoothed = {
     kick: 0,
@@ -317,7 +318,7 @@ export class AudioService implements OnModuleDestroy {
     const { command, args } = this.buildProbeCommand(source);
     const result = spawnSync(command, args, {
       timeout: 1500,
-      maxBuffer: SAMPLE_RATE * CHANNELS * 2 * 2,
+      maxBuffer: SAMPLE_RATE * this.audioChannels * 2 * 2,
     });
 
     if (
@@ -340,7 +341,7 @@ export class AudioService implements OnModuleDestroy {
           '--raw',
           '--format=s16le',
           `--rate=${SAMPLE_RATE}`,
-          `--channels=${CHANNELS}`,
+          `--channels=${this.audioChannels}`,
           `--device=${source.device}`,
         ],
       };
@@ -357,7 +358,7 @@ export class AudioService implements OnModuleDestroy {
         '-r',
         String(SAMPLE_RATE),
         '-c',
-        String(CHANNELS),
+        String(this.audioChannels),
         '-t',
         'raw',
         '-d',
@@ -374,7 +375,7 @@ export class AudioService implements OnModuleDestroy {
         '--raw',
         '--format=s16le',
         `--rate=${SAMPLE_RATE}`,
-        `--channels=${CHANNELS}`,
+        `--channels=${this.audioChannels}`,
         `--device=${source.device}`,
       ]);
     }
@@ -388,7 +389,7 @@ export class AudioService implements OnModuleDestroy {
       '-r',
       String(SAMPLE_RATE),
       '-c',
-      String(CHANNELS),
+      String(this.audioChannels),
       '-t',
       'raw',
     ]);
@@ -413,11 +414,18 @@ export class AudioService implements OnModuleDestroy {
     return Math.sqrt(sumSquares / sampleCount);
   }
 
+  private getAudioChannels() {
+    const configured = Number(this.config.get('AUDIO_CHANNELS'));
+    return Number.isInteger(configured) && configured > 0
+      ? configured
+      : DEFAULT_CHANNELS;
+  }
+
   private handleChunk(buf: Buffer) {
     const { type, data } = this.parseChunk(buf);
     if (!data) return;
 
-    const mono = this.toMono(data, CHANNELS, type);
+    const mono = this.toMono(data, this.audioChannels, type);
     for (let i = 0; i < mono.length; i++) {
       this.audioMono[this.audioWriteIndex] = mono[i];
       this.audioWriteIndex = (this.audioWriteIndex + 1) % FFT_SIZE;
@@ -458,7 +466,12 @@ export class AudioService implements OnModuleDestroy {
     const scale = type === 'int16' ? 1 / 32768 : 1;
 
     for (let i = 0, j = 0; j < nFrames; i += channels, j++) {
-      const v = ((Number(arr[i]) + Number(arr[i + 1])) / 2) * scale;
+      let frameSum = 0;
+      for (let channel = 0; channel < channels; channel++) {
+        frameSum += Number(arr[i + channel]);
+      }
+
+      const v = (frameSum / channels) * scale;
       out[j] = Number.isFinite(v) ? v : 0;
     }
 
