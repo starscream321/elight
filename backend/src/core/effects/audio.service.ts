@@ -69,6 +69,13 @@ export class AudioService implements OnModuleDestroy {
     treble: 1e-3,
   };
 
+  private baseline = {
+    kick: 1e-3,
+    bass: 1e-3,
+    mid: 1e-3,
+    treble: 1e-3,
+  };
+
   private dcBlockX = 0;
   private dcBlockY = 0;
   private beatCooldown = 0;
@@ -120,21 +127,21 @@ export class AudioService implements OnModuleDestroy {
     this.peak.mid = Math.max(this.peak.mid * 0.9992, midRaw);
     this.peak.treble = Math.max(this.peak.treble * 0.9992, trebleRaw);
 
-    const kickNorm = this.shapeBand(
-      this.noiseGate(kickRaw / this.peak.kick, 0.08),
+    this.updateBaseline(kickRaw, bassRaw, midRaw, trebleRaw);
+
+    const kickNorm = this.bandTransient(
+      kickRaw,
+      this.baseline.kick,
+      1.15,
       1.25,
     );
-    const bassNorm = this.shapeBand(
-      this.noiseGate(bassRaw / this.peak.bass, 0.09),
-      1.3,
-    );
-    const midNorm = this.shapeBand(
-      this.noiseGate(midRaw / this.peak.mid, 0.18),
-      1.65,
-    );
-    const trebleNorm = this.shapeBand(
-      this.noiseGate(trebleRaw / this.peak.treble, 0.22),
-      1.8,
+    const bassNorm = this.bandTransient(bassRaw, this.baseline.bass, 1.2, 1.35);
+    const midNorm = this.bandTransient(midRaw, this.baseline.mid, 1.45, 1.75);
+    const trebleNorm = this.bandTransient(
+      trebleRaw,
+      this.baseline.treble,
+      1.7,
+      1.9,
     );
 
     this.smoothed.kick = this.smoothValue(
@@ -568,6 +575,36 @@ export class AudioService implements OnModuleDestroy {
 
   private shapeBand(value: number, exponent: number) {
     return Math.pow(this.clamp(value, 0, 1), exponent);
+  }
+
+  private bandTransient(
+    raw: number,
+    baseline: number,
+    ratioThreshold: number,
+    exponent: number,
+  ) {
+    const ratio = raw / Math.max(baseline, 1e-6);
+    return this.shapeBand(
+      this.noiseGate(ratio - 1, ratioThreshold - 1),
+      exponent,
+    );
+  }
+
+  private updateBaseline(
+    kick: number,
+    bass: number,
+    mid: number,
+    treble: number,
+  ) {
+    this.baseline.kick = this.smoothBaseline(this.baseline.kick, kick);
+    this.baseline.bass = this.smoothBaseline(this.baseline.bass, bass);
+    this.baseline.mid = this.smoothBaseline(this.baseline.mid, mid);
+    this.baseline.treble = this.smoothBaseline(this.baseline.treble, treble);
+  }
+
+  private smoothBaseline(current: number, target: number) {
+    const rate = target > current ? 0.008 : 0.12;
+    return current + (target - current) * rate;
   }
 
   private conditionInputSample(sample: number) {
