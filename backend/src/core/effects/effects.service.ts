@@ -320,22 +320,28 @@ export class EffectsService {
     this.musicTexture +=
       safeDt * (0.32 + this.smoothTreble * 1.05 + this.dropFlash * 1.15);
 
-    const travelSpan = ledCount + ledCount * 0.34;
-    const travelHead = (this.musicFlow * ledCount * 0.62) % travelSpan;
-    const baseCenter = travelHead - ledCount * 0.17;
+    const waveRepeats = Math.max(4, Math.min(12, Math.round(ledCount / 420)));
+    const laneLength = ledCount / waveRepeats;
+    const travelHead = (this.musicFlow * laneLength * 0.82) % laneLength;
     const baseWidth = Math.max(
-      ledCount * 0.07,
-      ledCount * (0.08 + melodicDensity * 0.21 + this.dropFlash * 0.05),
+      laneLength * 0.16,
+      laneLength * (0.18 + melodicDensity * 0.24 + this.dropFlash * 0.08),
     );
-    const baseThickness = 0.1 + melodicDensity * 0.42 + this.dropFlash * 0.16;
-    const glowFloor = 0.006 + this.smoothEnergy * 0.055;
+    const baseThickness = 0.18 + melodicDensity * 0.55 + this.dropFlash * 0.22;
+    const glowFloor = 0.018 + this.smoothEnergy * 0.08;
 
     const pulseCenter = (ledCount - 1) * 0.5;
     const pulseRadius = this.pulseAge * ledCount * (0.85 + this.smoothKick * 0.55);
-    const pulseShellWidth = Math.max(1.3, ledCount * (0.022 + this.pulseStrength * 0.02));
+    const pulseShellWidth = Math.max(
+      1.3,
+      ledCount * (0.025 + this.pulseStrength * 0.024),
+    );
     const pulseFade = Math.max(0, 1 - this.pulseAge * 1.9);
     const pulseCoreFade = Math.max(0, 1 - this.pulseAge * 4.6);
-    const pulseCoreWidth = Math.max(1.8, ledCount * (0.035 + this.pulseStrength * 0.02));
+    const pulseCoreWidth = Math.max(
+      1.8,
+      ledCount * (0.045 + this.pulseStrength * 0.025),
+    );
     void hueBase;
 
     const sceneHueBase = 275;
@@ -346,24 +352,35 @@ export class EffectsService {
       transientPunch * 18 +
       this.dropFlash * 28;
     const bassFrontPosition =
-      this.bassFrontAge * ledCount * (1.35 + this.smoothKick * 0.85);
+      this.bassFrontAge * laneLength * (2.6 + this.smoothKick * 1.2);
     const bassFrontWidth = Math.max(
       1.6,
-      ledCount * (0.018 + this.bassFrontStrength * 0.018),
+      laneLength * (0.035 + this.bassFrontStrength * 0.032),
     );
     const bassFrontFade = Math.max(0, 1 - this.bassFrontAge * 2.35);
     const brightnessMultiplier =
       safeBrightness *
-      (0.18 +
-        this.smoothEnergy * 0.62 +
-        this.beatFlash * 0.16 +
-        this.dropFlash * 0.28);
+      (0.42 +
+        this.smoothEnergy * 0.8 +
+        this.beatFlash * 0.28 +
+        this.dropFlash * 0.46);
 
     for (let i = 0; i < ledCount; i++) {
-      const distToBand = i - baseCenter;
+      const laneIndex = Math.floor(i / laneLength);
+      const laneX = i - laneIndex * laneLength;
+      const laneOffset = (laneIndex % 3) * laneLength * 0.18;
+      const baseCenter = (travelHead + laneOffset) % laneLength;
+      const distToBand = Math.min(
+        Math.abs(laneX - baseCenter),
+        laneLength - Math.abs(laneX - baseCenter),
+      );
       const leadingBand = this.gaussian(distToBand, baseWidth);
       const trailingBand = this.gaussian(
-        i - (baseCenter - baseWidth * 0.72),
+        Math.min(
+          Math.abs(laneX - ((baseCenter - baseWidth * 0.72 + laneLength) % laneLength)),
+          laneLength -
+            Math.abs(laneX - ((baseCenter - baseWidth * 0.72 + laneLength) % laneLength)),
+        ),
         baseWidth * 1.45,
       );
       const bandBody = leadingBand * (0.42 + baseThickness) + trailingBand * 0.22;
@@ -387,10 +404,16 @@ export class EffectsService {
         this.pulseStrength *
         1.35;
       const bassFront =
-        this.gaussian(i - bassFrontPosition, bassFrontWidth) *
+        this.gaussian(
+          Math.min(
+            Math.abs(laneX - bassFrontPosition),
+            laneLength - Math.abs(laneX - bassFrontPosition),
+          ),
+          bassFrontWidth,
+        ) *
         bassFrontFade *
         this.bassFrontStrength *
-        1.6;
+        1.95;
 
       const sparkleSeed = this.fract(
         Math.sin(i * 12.9898 + this.musicTexture * 17.123 + this.musicFlow * 9.37) *
@@ -422,7 +445,7 @@ export class EffectsService {
           this.beatFlash * 0.05) *
         brightnessMultiplier;
 
-      value = this.softClip(value);
+      value = this.softClip(value * 1.55);
       value = this.clamp(value, 0, 1);
       value = Number.isFinite(value) ? value : 0;
 
