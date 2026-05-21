@@ -202,7 +202,8 @@ export class EffectsService {
     hueBase = 0,
   ): Promise<Uint8Array> {
     const pixels = new Uint8Array(ledCount * 3);
-    const safeBrightness = this.clampBrightness(brightness, 0.08);
+    const safeBrightness =
+      brightness <= 0 ? 0 : this.clamp(brightness ?? 0.7, 0.12, 1);
     if (safeBrightness === 0) return pixels;
 
     const spectrum = this.audioService.getAudioSpectrum();
@@ -320,27 +321,22 @@ export class EffectsService {
     this.musicTexture +=
       safeDt * (0.32 + this.smoothTreble * 1.05 + this.dropFlash * 1.15);
 
-    const waveRepeats = Math.max(4, Math.min(12, Math.round(ledCount / 420)));
-    const laneLength = ledCount / waveRepeats;
-    const travelHead = (this.musicFlow * laneLength * 0.82) % laneLength;
-    const baseWidth = Math.max(
-      laneLength * 0.16,
-      laneLength * (0.18 + melodicDensity * 0.24 + this.dropFlash * 0.08),
-    );
-    const baseThickness = 0.18 + melodicDensity * 0.55 + this.dropFlash * 0.22;
-    const glowFloor = 0.018 + this.smoothEnergy * 0.08;
-
+    const fullWavePhase = this.musicFlow * Math.PI * 2;
+    const texturePhase = this.musicTexture * Math.PI * 2;
+    const ambientBreath =
+      Math.sin(fullWavePhase * 0.42) * 0.5 +
+      Math.sin(fullWavePhase * 0.19 + 1.7) * 0.5;
     const pulseCenter = (ledCount - 1) * 0.5;
     const pulseRadius = this.pulseAge * ledCount * (0.85 + this.smoothKick * 0.55);
     const pulseShellWidth = Math.max(
       1.3,
-      ledCount * (0.025 + this.pulseStrength * 0.024),
+      ledCount * (0.035 + this.pulseStrength * 0.032),
     );
     const pulseFade = Math.max(0, 1 - this.pulseAge * 1.9);
     const pulseCoreFade = Math.max(0, 1 - this.pulseAge * 4.6);
     const pulseCoreWidth = Math.max(
       1.8,
-      ledCount * (0.045 + this.pulseStrength * 0.025),
+      ledCount * (0.07 + this.pulseStrength * 0.035),
     );
     void hueBase;
 
@@ -352,46 +348,31 @@ export class EffectsService {
       transientPunch * 18 +
       this.dropFlash * 28;
     const bassFrontPosition =
-      this.bassFrontAge * laneLength * (2.6 + this.smoothKick * 1.2);
-    const bassFrontWidth = Math.max(
-      1.6,
-      laneLength * (0.035 + this.bassFrontStrength * 0.032),
-    );
+      (this.bassFrontAge * (1.65 + this.smoothKick * 0.65)) % 1;
+    const bassFrontWidth = 0.055 + this.bassFrontStrength * 0.045;
     const bassFrontFade = Math.max(0, 1 - this.bassFrontAge * 2.35);
     const brightnessMultiplier =
       safeBrightness *
-      (0.42 +
-        this.smoothEnergy * 0.8 +
-        this.beatFlash * 0.28 +
-        this.dropFlash * 0.46);
+      (0.78 +
+        this.smoothEnergy * 0.72 +
+        this.beatFlash * 0.22 +
+        this.dropFlash * 0.38);
 
     for (let i = 0; i < ledCount; i++) {
-      const laneIndex = Math.floor(i / laneLength);
-      const laneX = i - laneIndex * laneLength;
-      const laneOffset = (laneIndex % 3) * laneLength * 0.18;
-      const baseCenter = (travelHead + laneOffset) % laneLength;
-      const distToBand = Math.min(
-        Math.abs(laneX - baseCenter),
-        laneLength - Math.abs(laneX - baseCenter),
-      );
-      const leadingBand = this.gaussian(distToBand, baseWidth);
-      const trailingBand = this.gaussian(
-        Math.min(
-          Math.abs(laneX - ((baseCenter - baseWidth * 0.72 + laneLength) % laneLength)),
-          laneLength -
-            Math.abs(laneX - ((baseCenter - baseWidth * 0.72 + laneLength) % laneLength)),
-        ),
-        baseWidth * 1.45,
-      );
-      const bandBody = leadingBand * (0.42 + baseThickness) + trailingBand * 0.22;
-      const bandTexture =
-        (Math.sin(i * 0.095 - this.musicFlow * 8.2) * 0.5 + 0.5) *
-          (0.08 + lowDrive * 0.18) +
-        (Math.sin(i * 0.16 - this.musicTexture * 5.6 + this.smoothMid * 3) *
-          0.5 +
-          0.5) *
-          (0.05 + melodicDensity * 0.08);
-      const baseWave = glowFloor + bandBody * (0.35 + bandTexture);
+      const x = ledCount <= 1 ? 0 : i / (ledCount - 1);
+      const wideWaveA =
+        Math.sin(x * Math.PI * 2 * 1.35 - fullWavePhase * 1.35) * 0.5 + 0.5;
+      const wideWaveB =
+        Math.sin(x * Math.PI * 2 * 2.15 - texturePhase * 0.72 + 1.8) * 0.5 +
+        0.5;
+      const leadingBand = Math.pow(wideWaveA, 1.25);
+      const trailingBand = Math.pow(wideWaveB, 1.9);
+      const baseWave =
+        0.1 +
+        ambientBreath * 0.018 +
+        this.smoothEnergy * 0.12 +
+        leadingBand * (0.16 + melodicDensity * 0.38) +
+        trailingBand * (0.05 + lowDrive * 0.12);
 
       const centerDistance = Math.abs(i - pulseCenter);
       const pulseCore =
@@ -404,16 +385,20 @@ export class EffectsService {
         this.pulseStrength *
         1.35;
       const bassFront =
-        this.gaussian(
-          Math.min(
-            Math.abs(laneX - bassFrontPosition),
-            laneLength - Math.abs(laneX - bassFrontPosition),
+        Math.max(
+          this.gaussian(Math.abs(x - bassFrontPosition), bassFrontWidth),
+          this.gaussian(
+            Math.abs(((x + 0.33) % 1) - bassFrontPosition),
+            bassFrontWidth,
           ),
-          bassFrontWidth,
+          this.gaussian(
+            Math.abs(((x + 0.66) % 1) - bassFrontPosition),
+            bassFrontWidth,
+          ),
         ) *
         bassFrontFade *
         this.bassFrontStrength *
-        1.95;
+        1.35;
 
       const sparkleSeed = this.fract(
         Math.sin(i * 12.9898 + this.musicTexture * 17.123 + this.musicFlow * 9.37) *
@@ -430,22 +415,21 @@ export class EffectsService {
         (0.45 + leadingBand * 0.38 + this.beatFlash * 0.28);
 
       const undertow =
-        (Math.sin(i * 0.043 - this.musicFlow * 3.4) * 0.5 + 0.5) *
+        (Math.sin(x * Math.PI * 2 * 4 - fullWavePhase * 0.86) * 0.5 + 0.5) *
         (0.025 + lowDrive * 0.045);
 
       let value =
         (baseWave +
-          pulseCore +
-          pulseShell +
-          bassFront +
-          sparkle +
+          pulseCore * 0.95 +
+          pulseShell * 1.05 +
+          bassFront * 1.2 +
+          sparkle * 1.15 +
           undertow +
           transientPunch * 0.16 +
-          this.dropFlash * 0.12 +
-          this.beatFlash * 0.05) *
+          this.dropFlash * 0.2 +
+          this.beatFlash * 0.1) *
         brightnessMultiplier;
 
-      value = this.softClip(value * 1.55);
       value = this.clamp(value, 0, 1);
       value = Number.isFinite(value) ? value : 0;
 
