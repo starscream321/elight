@@ -115,6 +115,11 @@ export class EffectsService {
     return value - Math.floor(value);
   }
 
+  private circularDistance(a: number, b: number, period = 1): number {
+    const distance = Math.abs(a - b) % period;
+    return Math.min(distance, period - distance);
+  }
+
   private smoothAR(
     current: number,
     target: number,
@@ -326,6 +331,9 @@ export class EffectsService {
     const ambientBreath =
       Math.sin(fullWavePhase * 0.42) * 0.5 +
       Math.sin(fullWavePhase * 0.19 + 1.7) * 0.5;
+    const bassRepeats = Math.max(3, Math.min(10, Math.round(ledCount / 650)));
+    const midRepeats = bassRepeats * 2;
+    const trebleRepeats = bassRepeats * 5;
     const pulseCenter = (ledCount - 1) * 0.5;
     const pulseRadius = this.pulseAge * ledCount * (0.85 + this.smoothKick * 0.55);
     const pulseShellWidth = Math.max(
@@ -347,10 +355,10 @@ export class EffectsService {
       this.smoothTreble * -18 +
       transientPunch * 18 +
       this.dropFlash * 28;
-    const bassFrontPosition =
-      (this.bassFrontAge * (1.65 + this.smoothKick * 0.65)) % 1;
     const bassFrontWidth = 0.055 + this.bassFrontStrength * 0.045;
     const bassFrontFade = Math.max(0, 1 - this.bassFrontAge * 2.35);
+    const bassFrontCycle =
+      (this.bassFrontAge * (2.4 + this.smoothKick * 0.9)) % 1;
     const brightnessMultiplier =
       safeBrightness *
       (0.78 +
@@ -360,19 +368,27 @@ export class EffectsService {
 
     for (let i = 0; i < ledCount; i++) {
       const x = ledCount <= 1 ? 0 : i / (ledCount - 1);
-      const wideWaveA =
-        Math.sin(x * Math.PI * 2 * 1.35 - fullWavePhase * 1.35) * 0.5 + 0.5;
-      const wideWaveB =
-        Math.sin(x * Math.PI * 2 * 2.15 - texturePhase * 0.72 + 1.8) * 0.5 +
+      const bassBand =
+        Math.sin(x * Math.PI * 2 * bassRepeats - fullWavePhase * 1.05) * 0.5 +
         0.5;
-      const leadingBand = Math.pow(wideWaveA, 1.25);
-      const trailingBand = Math.pow(wideWaveB, 1.9);
+      const midBand =
+        Math.sin(x * Math.PI * 2 * midRepeats - fullWavePhase * 1.55 + 1.2) *
+          0.5 +
+        0.5;
+      const trebleBand =
+        Math.sin(x * Math.PI * 2 * trebleRepeats - texturePhase * 2.2 + 2.4) *
+          0.5 +
+        0.5;
+      const leadingBand = Math.pow(midBand, 1.18);
+      const trailingBand = Math.pow(bassBand, 1.8);
+      const trebleLayer = Math.pow(trebleBand, 3.5) * trebleDust;
       const baseWave =
-        0.1 +
+        0.12 +
         ambientBreath * 0.018 +
         this.smoothEnergy * 0.12 +
-        leadingBand * (0.16 + melodicDensity * 0.38) +
-        trailingBand * (0.05 + lowDrive * 0.12);
+        trailingBand * (0.08 + lowDrive * 0.25) +
+        leadingBand * (0.12 + melodicDensity * 0.36) +
+        trebleLayer * 0.08;
 
       const centerDistance = Math.abs(i - pulseCenter);
       const pulseCore =
@@ -386,13 +402,22 @@ export class EffectsService {
         1.35;
       const bassFront =
         Math.max(
-          this.gaussian(Math.abs(x - bassFrontPosition), bassFrontWidth),
           this.gaussian(
-            Math.abs(((x + 0.33) % 1) - bassFrontPosition),
+            this.circularDistance((x * bassRepeats) % 1, bassFrontCycle),
             bassFrontWidth,
           ),
           this.gaussian(
-            Math.abs(((x + 0.66) % 1) - bassFrontPosition),
+            this.circularDistance(
+              (x * bassRepeats + 0.33) % 1,
+              bassFrontCycle,
+            ),
+            bassFrontWidth,
+          ),
+          this.gaussian(
+            this.circularDistance(
+              (x * bassRepeats + 0.66) % 1,
+              bassFrontCycle,
+            ),
             bassFrontWidth,
           ),
         ) *
@@ -404,15 +429,15 @@ export class EffectsService {
         Math.sin(i * 12.9898 + this.musicTexture * 17.123 + this.musicFlow * 9.37) *
           43758.5453,
       );
-      const sparkleGate = 0.994 - trebleDust * 0.045 - this.dropFlash * 0.016;
+      const sparkleGate = 0.992 - trebleDust * 0.058 - this.dropFlash * 0.022;
       const sparkleBurst =
         sparkleSeed > sparkleGate
-          ? Math.pow((sparkleSeed - sparkleGate) / (1 - sparkleGate), 2.7)
+          ? Math.pow((sparkleSeed - sparkleGate) / (1 - sparkleGate), 2.2)
           : 0;
       const sparkle =
         sparkleBurst *
-        (0.16 + trebleDust * 0.82 + this.dropFlash * 0.55) *
-        (0.45 + leadingBand * 0.38 + this.beatFlash * 0.28);
+        (0.25 + trebleDust * 1.05 + this.dropFlash * 0.65) *
+        (0.55 + trebleLayer * 0.55 + this.beatFlash * 0.22);
 
       const undertow =
         (Math.sin(x * Math.PI * 2 * 4 - fullWavePhase * 0.86) * 0.5 + 0.5) *
@@ -423,7 +448,7 @@ export class EffectsService {
           pulseCore * 0.95 +
           pulseShell * 1.05 +
           bassFront * 1.2 +
-          sparkle * 1.15 +
+          sparkle * 1.35 +
           undertow +
           transientPunch * 0.16 +
           this.dropFlash * 0.2 +
@@ -438,9 +463,10 @@ export class EffectsService {
           hueDrift +
           leadingBand * (20 + melodicDensity * 26) -
           trailingBand * 20 +
+          trebleLayer * -38 +
           pulseShell * 28 +
           bassFront * 46 +
-          sparkle * -82 +
+          sparkle * -95 +
           i * (0.05 + this.smoothTreble * 0.06)) %
         360;
       const saturation = this.clamp(
