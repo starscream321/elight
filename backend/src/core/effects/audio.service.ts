@@ -18,6 +18,11 @@ const DEFAULT_NOISE_FLOOR_RMS = 0.006;
 const DEFAULT_PULSE_LATENCY_MS = 20;
 const DEFAULT_ALSA_PERIOD_MS = 10;
 const DEFAULT_ALSA_BUFFER_MS = 30;
+const DEFAULT_NORMALIZE_TARGET_RMS = 0.09;
+const DEFAULT_NORMALIZE_MIN_GAIN = 0.25;
+const DEFAULT_NORMALIZE_MAX_GAIN = 7;
+const GAIN_DECREASE_RATE = 0.28;
+const GAIN_INCREASE_RATE = 0.1;
 const ENVELOPE_BEAT_THRESHOLD = 0.04;
 const ENVELOPE_BEAT_RATIO = 1.7;
 const ENVELOPE_BEAT_COOLDOWN_SAMPLES = Math.round(SAMPLE_RATE * 0.12);
@@ -99,11 +104,16 @@ export class AudioService implements OnModuleDestroy {
   private readonly pulseLatencyMs: number;
   private readonly alsaPeriodMs: number;
   private readonly alsaBufferMs: number;
+  private readonly normalizeTargetRms: number;
+  private readonly normalizeMinGain: number;
+  private readonly normalizeMaxGain: number;
   private inputDebugSumSquares = 0;
   private inputDebugPeak = 0;
   private inputDebugSamples = 0;
   private inputRmsSumSquares = 0;
   private inputRmsSamples = 0;
+  private inputGain = 1;
+  private normalizedWindowRms = 0;
   private lastDebugAt = 0;
 
   private smoothed = {
@@ -151,6 +161,21 @@ export class AudioService implements OnModuleDestroy {
         DEFAULT_ALSA_BUFFER_MS,
       ),
     );
+    this.normalizeTargetRms = this.getPositiveConfigNumber(
+      'AUDIO_NORMALIZE_TARGET_RMS',
+      DEFAULT_NORMALIZE_TARGET_RMS,
+    );
+    this.normalizeMinGain = this.getPositiveConfigNumber(
+      'AUDIO_NORMALIZE_MIN_GAIN',
+      DEFAULT_NORMALIZE_MIN_GAIN,
+    );
+    this.normalizeMaxGain = Math.max(
+      this.normalizeMinGain,
+      this.getPositiveConfigNumber(
+        'AUDIO_NORMALIZE_MAX_GAIN',
+        DEFAULT_NORMALIZE_MAX_GAIN,
+      ),
+    );
   }
 
   onModuleDestroy() {
@@ -172,9 +197,16 @@ export class AudioService implements OnModuleDestroy {
       return features;
     }
 
+    const windowRms = this.calculateCurrentWindowRms();
+    const gain = this.updateInputGain(windowRms);
+    this.normalizedWindowRms = windowRms * gain;
+
     for (let i = 0; i < FFT_SIZE; i++) {
       const sourceIndex = (this.audioWriteIndex + i) % FFT_SIZE;
-      this.windowedAudio[i] = this.audioMono[sourceIndex] * this.window[i];
+      const normalizedSample = this.softLimitSample(
+        this.audioMono[sourceIndex] * gain,
+      );
+      this.windowedAudio[i] = normalizedSample * this.window[i];
     }
 
     const spectrum = FFT(this.windowedAudio);
@@ -568,6 +600,13 @@ export class AudioService implements OnModuleDestroy {
       : fallback;
   }
 
+  private getPositiveConfigNumber(key: string, fallback: number) {
+    const configured = Number(this.config.get(key));
+    return Number.isFinite(configured) && configured > 0
+      ? configured
+      : fallback;
+  }
+
   private getBooleanConfig(key: string) {
     const value = this.config.get<string | boolean>(key);
     if (typeof value === 'boolean') return value;
@@ -645,6 +684,41 @@ export class AudioService implements OnModuleDestroy {
 
   private smoothValue(curr: number, prev: number, rise = 0.25, fall = 0.1) {
     return prev + (curr - prev) * (curr > prev ? rise : fall);
+  }
+
+  private calculateCurrentWindowRms() {
+    let sumSquares = 0;
+
+    for (let i = 0; i < FFT_SIZE; i++) {
+      const sourceIndex = (this.audioWriteIndex + i) % FFT_SIZE;
+      const sample = this.audioMono[sourceIndex];
+      sumSquares += sample * sample;
+    }
+
+    return Math.sqrt(sumSquares / FFT_SIZE);
+  }
+
+  private updateInputGain(windowRms: number) {
+    if (!Number.isFinite(windowRms) || windowRms <= this.noiseFloorRms) {
+      this.inputGain = this.smoothValue(1, this.inputGain, 0.08, 0.08);
+      return this.inputGain;
+    }
+
+    const desiredGain = this.clamp(
+      this.normalizeTargetRms / Math.max(windowRms, this.noiseFloorRms),
+      this.normalizeMinGain,
+      this.normalizeMaxGain,
+    );
+    const rate =
+      desiredGain < this.inputGain ? GAIN_DECREASE_RATE : GAIN_INCREASE_RATE;
+
+    this.inputGain += (desiredGain - this.inputGain) * rate;
+    return this.inputGain;
+  }
+
+  private softLimitSample(sample: number) {
+    if (!Number.isFinite(sample)) return 0;
+    return Math.tanh(sample);
   }
 
   private weightedBandRms(
@@ -788,6 +862,8 @@ export class AudioService implements OnModuleDestroy {
       [
         'Audio debug',
         `inRms=${debugInputRms.toFixed(4)}`,
+        `normRms=${this.normalizedWindowRms.toFixed(4)}`,
+        `gain=${this.inputGain.toFixed(2)}`,
         `inPeak=${this.inputDebugPeak.toFixed(4)}`,
         `noiseFloor=${this.noiseFloorRms.toFixed(4)}`,
         `kick=${features.kick.toFixed(3)}`,
@@ -812,6 +888,8 @@ export class AudioService implements OnModuleDestroy {
     this.pendingEnvelopeBeat = false;
     this.inputEnvelopeFast = 0;
     this.inputEnvelopeSlow = 0;
+    this.inputGain = this.smoothValue(1, this.inputGain, 0.08, 0.08);
+    this.normalizedWindowRms = 0;
   }
 
   private detectBeatFromLowEnergy(kickRaw: number, bassRaw: number) {
