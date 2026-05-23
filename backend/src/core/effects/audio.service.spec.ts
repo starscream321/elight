@@ -5,6 +5,12 @@ import { AudioService } from './audio.service';
 type AudioServiceInternals = {
     updateInputGain(windowRms: number, windowPeak?: number): number;
     softLimitSample(sample: number): number;
+    bandTransient(
+        raw: number,
+        baseline: number,
+        ratioThreshold: number,
+        exponent: number,
+    ): number;
 };
 
 describe('AudioService normalization', () => {
@@ -75,5 +81,16 @@ describe('AudioService normalization', () => {
         expect(service.softLimitSample(8)).toBeLessThan(1);
         expect(service.softLimitSample(-8)).toBeGreaterThan(-1);
         expect(service.softLimitSample(Number.NaN)).toBe(0);
+    });
+
+    it('keeps band transients below saturation on sustained loud ratios', () => {
+        const service = createService() as unknown as AudioServiceInternals;
+
+        const moderateTransient = service.bandTransient(2, 1, 1.1, 1.1);
+        const strongTransient = service.bandTransient(10, 1, 1.1, 1.1);
+
+        expect(moderateTransient).toBeGreaterThan(0);
+        expect(moderateTransient).toBeLessThan(0.4);
+        expect(strongTransient).toBeLessThan(0.9);
     });
 });

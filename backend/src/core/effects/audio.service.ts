@@ -26,6 +26,9 @@ const GAIN_DECREASE_RATE = 0.82;
 const GAIN_INCREASE_RATE = 0.1;
 const MAX_GAIN_OVERSHOOT = 1.35;
 const CLIP_WARNING_LEVEL = 0.95;
+const BAND_TRANSIENT_SOFTNESS = 1.65;
+const BASELINE_RISE_RATE = 0.035;
+const BASELINE_FALL_RATE = 0.025;
 const ENVELOPE_BEAT_THRESHOLD = 0.04;
 const ENVELOPE_BEAT_RATIO = 1.7;
 const ENVELOPE_BEAT_COOLDOWN_SAMPLES = Math.round(SAMPLE_RATE * 0.12);
@@ -200,14 +203,14 @@ export class AudioService implements OnModuleDestroy {
     }
 
     const currentInputRms = this.consumeInputRms();
-    if (currentInputRms < this.noiseFloorRms) {
+    const windowStats = this.calculateCurrentWindowStats();
+    if (windowStats.rms < this.noiseFloorRms) {
       const features = this.emptyFeatures();
       this.resetAudioAnalysisState();
       this.logDebug(features, currentInputRms);
       return features;
     }
 
-    const windowStats = this.calculateCurrentWindowStats();
     const gain = this.updateInputGain(windowStats.rms, windowStats.peak);
     this.normalizedWindowRms = windowStats.rms * gain;
     this.normalizedWindowPeak = windowStats.peak * gain;
@@ -788,10 +791,11 @@ export class AudioService implements OnModuleDestroy {
     exponent: number,
   ) {
     const ratio = raw / Math.max(baseline, 1e-6);
-    return this.shapeBand(
-      this.noiseGate(ratio - 1, ratioThreshold - 1),
-      exponent,
-    );
+    const excess = ratio - ratioThreshold;
+    if (!Number.isFinite(excess) || excess <= 0) return 0;
+
+    const softKnee = excess / (excess + BAND_TRANSIENT_SOFTNESS);
+    return this.shapeBand(softKnee, exponent);
   }
 
   private updateBaseline(
@@ -807,7 +811,7 @@ export class AudioService implements OnModuleDestroy {
   }
 
   private smoothBaseline(current: number, target: number) {
-    const rate = target > current ? 0.008 : 0.12;
+    const rate = target > current ? BASELINE_RISE_RATE : BASELINE_FALL_RATE;
     return current + (target - current) * rate;
   }
 
