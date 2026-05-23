@@ -15,9 +15,53 @@ const LEGACY_WINDOWS_AUDIO_DEVICE = 'CABLE Output (VB-Audio Virtual Cable)';
 const DEFAULT_AUTO_MIN_RMS = 0.002;
 const DEFAULT_DEBUG_INTERVAL_MS = 1000;
 const DEFAULT_NOISE_FLOOR_RMS = 0.006;
+const DEFAULT_PULSE_LATENCY_MS = 20;
+const DEFAULT_ALSA_PERIOD_MS = 10;
+const DEFAULT_ALSA_BUFFER_MS = 30;
 const ENVELOPE_BEAT_THRESHOLD = 0.04;
 const ENVELOPE_BEAT_RATIO = 1.7;
-const ENVELOPE_BEAT_COOLDOWN_SAMPLES = Math.round(SAMPLE_RATE * 0.17);
+const ENVELOPE_BEAT_COOLDOWN_SAMPLES = Math.round(SAMPLE_RATE * 0.12);
+
+const BAND_SETTINGS = {
+  kick: {
+    fromHz: 45,
+    toHz: 125,
+    centerHz: 78,
+    ratioThreshold: 1.1,
+    exponent: 1.1,
+    rise: 0.62,
+    fall: 0.18,
+  },
+  bass: {
+    fromHz: 125,
+    toHz: 320,
+    centerHz: 190,
+    ratioThreshold: 1.14,
+    exponent: 1.2,
+    rise: 0.5,
+    fall: 0.16,
+  },
+  mid: {
+    fromHz: 320,
+    toHz: 2200,
+    centerHz: 850,
+    ratioThreshold: 1.28,
+    exponent: 1.45,
+    rise: 0.32,
+    fall: 0.11,
+  },
+  treble: {
+    fromHz: 2200,
+    toHz: 9000,
+    centerHz: 4800,
+    ratioThreshold: 1.45,
+    exponent: 1.55,
+    rise: 0.28,
+    fall: 0.1,
+  },
+} as const;
+
+type BandSettings = (typeof BAND_SETTINGS)[keyof typeof BAND_SETTINGS];
 
 export interface AudioFeatures {
   kick: number;
@@ -52,6 +96,9 @@ export class AudioService implements OnModuleDestroy {
   private readonly debugEnabled: boolean;
   private readonly debugIntervalMs: number;
   private readonly noiseFloorRms: number;
+  private readonly pulseLatencyMs: number;
+  private readonly alsaPeriodMs: number;
+  private readonly alsaBufferMs: number;
   private inputDebugSumSquares = 0;
   private inputDebugPeak = 0;
   private inputDebugSamples = 0;
@@ -64,13 +111,6 @@ export class AudioService implements OnModuleDestroy {
     bass: 0,
     mid: 0,
     treble: 0,
-  };
-
-  private peak = {
-    kick: 1e-3,
-    bass: 1e-3,
-    mid: 1e-3,
-    treble: 1e-3,
   };
 
   private baseline = {
@@ -96,6 +136,21 @@ export class AudioService implements OnModuleDestroy {
     this.debugEnabled = this.getBooleanConfig('AUDIO_DEBUG');
     this.debugIntervalMs = this.getDebugIntervalMs();
     this.noiseFloorRms = this.getNoiseFloorRms();
+    this.pulseLatencyMs = this.getPositiveConfigInt(
+      'AUDIO_PULSE_LATENCY_MS',
+      DEFAULT_PULSE_LATENCY_MS,
+    );
+    this.alsaPeriodMs = this.getPositiveConfigInt(
+      'AUDIO_ALSA_PERIOD_MS',
+      DEFAULT_ALSA_PERIOD_MS,
+    );
+    this.alsaBufferMs = Math.max(
+      this.alsaPeriodMs * 2,
+      this.getPositiveConfigInt(
+        'AUDIO_ALSA_BUFFER_MS',
+        DEFAULT_ALSA_BUFFER_MS,
+      ),
+    );
   }
 
   onModuleDestroy() {
@@ -127,59 +182,63 @@ export class AudioService implements OnModuleDestroy {
       .slice(0, FFT_SIZE / 2)
       .map(([re, im]: [number, number]) => Math.hypot(re, im));
 
-    const bin = SAMPLE_RATE / FFT_SIZE;
-    const idx = (hz: number) => Math.min(mags.length - 1, Math.round(hz / bin));
+    const binHz = SAMPLE_RATE / FFT_SIZE;
 
-    const kickRaw = this.safeAvgRange(mags, idx(45), idx(135));
-    const bassRaw = this.safeAvgRange(mags, idx(90), idx(260));
-    const midRaw = this.safeAvgRange(mags, idx(260), idx(1800));
-    const trebleRaw = this.safeAvgRange(mags, idx(1800), idx(7000));
-
-    this.peak.kick = Math.max(this.peak.kick * 0.9985, kickRaw);
-    this.peak.bass = Math.max(this.peak.bass * 0.9988, bassRaw);
-    this.peak.mid = Math.max(this.peak.mid * 0.9992, midRaw);
-    this.peak.treble = Math.max(this.peak.treble * 0.9992, trebleRaw);
+    const kickRaw = this.weightedBandRms(mags, binHz, BAND_SETTINGS.kick);
+    const bassRaw = this.weightedBandRms(mags, binHz, BAND_SETTINGS.bass);
+    const midRaw = this.weightedBandRms(mags, binHz, BAND_SETTINGS.mid);
+    const trebleRaw = this.weightedBandRms(mags, binHz, BAND_SETTINGS.treble);
 
     this.updateBaseline(kickRaw, bassRaw, midRaw, trebleRaw);
 
     const kickNorm = this.bandTransient(
       kickRaw,
       this.baseline.kick,
-      1.15,
-      1.25,
+      BAND_SETTINGS.kick.ratioThreshold,
+      BAND_SETTINGS.kick.exponent,
     );
-    const bassNorm = this.bandTransient(bassRaw, this.baseline.bass, 1.2, 1.35);
-    const midNorm = this.bandTransient(midRaw, this.baseline.mid, 1.45, 1.75);
+    const bassNorm = this.bandTransient(
+      bassRaw,
+      this.baseline.bass,
+      BAND_SETTINGS.bass.ratioThreshold,
+      BAND_SETTINGS.bass.exponent,
+    );
+    const midNorm = this.bandTransient(
+      midRaw,
+      this.baseline.mid,
+      BAND_SETTINGS.mid.ratioThreshold,
+      BAND_SETTINGS.mid.exponent,
+    );
     const trebleNorm = this.bandTransient(
       trebleRaw,
       this.baseline.treble,
-      1.7,
-      1.9,
+      BAND_SETTINGS.treble.ratioThreshold,
+      BAND_SETTINGS.treble.exponent,
     );
 
     this.smoothed.kick = this.smoothValue(
       kickNorm,
       this.smoothed.kick,
-      0.38,
-      0.16,
+      BAND_SETTINGS.kick.rise,
+      BAND_SETTINGS.kick.fall,
     );
     this.smoothed.bass = this.smoothValue(
       bassNorm,
       this.smoothed.bass,
-      0.3,
-      0.14,
+      BAND_SETTINGS.bass.rise,
+      BAND_SETTINGS.bass.fall,
     );
     this.smoothed.mid = this.smoothValue(
       midNorm,
       this.smoothed.mid,
-      0.18,
-      0.09,
+      BAND_SETTINGS.mid.rise,
+      BAND_SETTINGS.mid.fall,
     );
     this.smoothed.treble = this.smoothValue(
       trebleNorm,
       this.smoothed.treble,
-      0.14,
-      0.07,
+      BAND_SETTINGS.treble.rise,
+      BAND_SETTINGS.treble.fall,
     );
 
     const energy =
@@ -403,6 +462,7 @@ export class AudioService implements OnModuleDestroy {
           '--format=s16le',
           `--rate=${SAMPLE_RATE}`,
           `--channels=${this.audioChannels}`,
+          `--latency-msec=${this.pulseLatencyMs}`,
           `--device=${source.device}`,
         ],
       };
@@ -422,6 +482,8 @@ export class AudioService implements OnModuleDestroy {
         String(this.audioChannels),
         '-t',
         'raw',
+        `--period-time=${this.alsaPeriodMs * 1000}`,
+        `--buffer-time=${this.alsaBufferMs * 1000}`,
         '-d',
         '1',
       ],
@@ -437,6 +499,7 @@ export class AudioService implements OnModuleDestroy {
         '--format=s16le',
         `--rate=${SAMPLE_RATE}`,
         `--channels=${this.audioChannels}`,
+        `--latency-msec=${this.pulseLatencyMs}`,
         `--device=${source.device}`,
       ]);
     }
@@ -453,6 +516,8 @@ export class AudioService implements OnModuleDestroy {
       String(this.audioChannels),
       '-t',
       'raw',
+      `--period-time=${this.alsaPeriodMs * 1000}`,
+      `--buffer-time=${this.alsaBufferMs * 1000}`,
     ]);
   }
 
@@ -494,6 +559,13 @@ export class AudioService implements OnModuleDestroy {
     return Number.isFinite(configured) && configured >= 0
       ? configured
       : DEFAULT_NOISE_FLOOR_RMS;
+  }
+
+  private getPositiveConfigInt(key: string, fallback: number) {
+    const configured = Number(this.config.get(key));
+    return Number.isInteger(configured) && configured > 0
+      ? configured
+      : fallback;
   }
 
   private getBooleanConfig(key: string) {
@@ -563,21 +635,6 @@ export class AudioService implements OnModuleDestroy {
     return out;
   }
 
-  private safeAvgRange(arr: number[], start: number, end: number) {
-    let sum = 0;
-    let count = 0;
-
-    for (let i = start; i < end; i++) {
-      const value = arr[i];
-      if (Number.isFinite(value)) {
-        sum += value;
-        count++;
-      }
-    }
-
-    return count ? sum / count : 0;
-  }
-
   private hannWindow(size: number) {
     const out = new Array<number>(size);
     for (let n = 0; n < size; n++) {
@@ -588,6 +645,32 @@ export class AudioService implements OnModuleDestroy {
 
   private smoothValue(curr: number, prev: number, rise = 0.25, fall = 0.1) {
     return prev + (curr - prev) * (curr > prev ? rise : fall);
+  }
+
+  private weightedBandRms(
+    mags: number[],
+    binHz: number,
+    band: BandSettings,
+  ) {
+    const start = Math.max(1, Math.floor(band.fromHz / binHz));
+    const end = Math.min(mags.length - 1, Math.ceil(band.toHz / binHz));
+    let weightedPower = 0;
+    let weightSum = 0;
+
+    for (let i = start; i <= end; i++) {
+      const value = mags[i];
+      if (!Number.isFinite(value)) continue;
+
+      const hz = Math.max(binHz, i * binHz);
+      const octaveDistance = Math.abs(Math.log2(hz / band.centerHz));
+      const focus =
+        0.35 + 0.65 * Math.exp(-0.5 * Math.pow(octaveDistance / 0.85, 2));
+
+      weightedPower += value * value * focus;
+      weightSum += focus;
+    }
+
+    return weightSum > 0 ? Math.sqrt(weightedPower / weightSum) : 0;
   }
 
   private noiseGate(value: number, threshold = 0.03) {

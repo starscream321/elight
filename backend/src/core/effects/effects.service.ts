@@ -241,7 +241,7 @@ export class EffectsService {
 
     const spectrum = this.audioService.getAudioSpectrum();
 
-    const nowSec = this.getTimeBase(timeInput) * this.SPEED_MUSIC;
+    const nowSec = this.getTimeBase(timeInput);
     const dt =
       this.lastMusicTimeSec === null ? 1 / 60 : nowSec - this.lastMusicTimeSec;
     this.lastMusicTimeSec = nowSec;
@@ -349,10 +349,11 @@ export class EffectsService {
       1.15,
     );
 
+    const flowDt = safeDt * this.SPEED_MUSIC;
     this.musicFlow +=
-      safeDt * (0.035 + this.smoothEnergy * 0.42 + this.dropFlash * 0.55);
+      flowDt * (0.035 + this.smoothEnergy * 0.42 + this.dropFlash * 0.55);
     this.musicTexture +=
-      safeDt * (0.32 + this.smoothTreble * 1.05 + this.dropFlash * 1.15);
+      flowDt * (0.32 + this.smoothTreble * 1.05 + this.dropFlash * 1.15);
 
     const fullWavePhase = this.musicFlow * Math.PI * 2;
     const texturePhase = this.musicTexture * Math.PI * 2;
