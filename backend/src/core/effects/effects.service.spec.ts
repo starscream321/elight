@@ -25,6 +25,9 @@ describe('EffectsService effects', () => {
         expect(frame.some((value) => value > 0)).toBe(true);
     };
 
+    const pixelLevel = (frame: Uint8Array, led: number) =>
+        frame[led * 3] + frame[led * 3 + 1] + frame[led * 3 + 2];
+
     it.each([
         ['staticColor', 1000, 0.5, 220],
         ['rainbow', 1000, 0.5, 0],
@@ -53,5 +56,28 @@ describe('EffectsService effects', () => {
             expect(frame).toHaveLength(ledCount * 3);
             expect(frame.every((value) => value === 0)).toBe(true);
         }
+    });
+
+    it('music spreads beat pulses across eight logical segments', async () => {
+        const ledCount = 80;
+        const frame = await service.music(ledCount, 1000, 0.7, 0);
+        const segmentSize = ledCount / 8;
+
+        const centers = Array.from({ length: 8 }, (_, segment) =>
+            Math.floor(segment * segmentSize + segmentSize / 2),
+        );
+        const shoulders = Array.from({ length: 8 }, (_, segment) =>
+            Math.floor(segment * segmentSize + segmentSize * 0.25),
+        );
+
+        const centerAverage =
+            centers.reduce((sum, led) => sum + pixelLevel(frame, led), 0) /
+            centers.length;
+        const shoulderAverage =
+            shoulders.reduce((sum, led) => sum + pixelLevel(frame, led), 0) /
+            shoulders.length;
+
+        expect(Math.min(...centers.map((led) => pixelLevel(frame, led)))).toBeGreaterThan(40);
+        expect(centerAverage).toBeGreaterThan(shoulderAverage * 1.2);
     });
 });
