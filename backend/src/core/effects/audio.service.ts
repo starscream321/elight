@@ -18,11 +18,14 @@ const DEFAULT_NOISE_FLOOR_RMS = 0.006;
 const DEFAULT_PULSE_LATENCY_MS = 20;
 const DEFAULT_ALSA_PERIOD_MS = 10;
 const DEFAULT_ALSA_BUFFER_MS = 30;
-const DEFAULT_NORMALIZE_TARGET_RMS = 0.09;
-const DEFAULT_NORMALIZE_MIN_GAIN = 0.25;
+const DEFAULT_NORMALIZE_TARGET_RMS = 0.06;
+const DEFAULT_NORMALIZE_TARGET_PEAK = 0.35;
+const DEFAULT_NORMALIZE_MIN_GAIN = 0.05;
 const DEFAULT_NORMALIZE_MAX_GAIN = 7;
-const GAIN_DECREASE_RATE = 0.28;
+const GAIN_DECREASE_RATE = 0.82;
 const GAIN_INCREASE_RATE = 0.1;
+const MAX_GAIN_OVERSHOOT = 1.35;
+const CLIP_WARNING_LEVEL = 0.95;
 const ENVELOPE_BEAT_THRESHOLD = 0.04;
 const ENVELOPE_BEAT_RATIO = 1.7;
 const ENVELOPE_BEAT_COOLDOWN_SAMPLES = Math.round(SAMPLE_RATE * 0.12);
@@ -105,15 +108,18 @@ export class AudioService implements OnModuleDestroy {
   private readonly alsaPeriodMs: number;
   private readonly alsaBufferMs: number;
   private readonly normalizeTargetRms: number;
+  private readonly normalizeTargetPeak: number;
   private readonly normalizeMinGain: number;
   private readonly normalizeMaxGain: number;
   private inputDebugSumSquares = 0;
   private inputDebugPeak = 0;
   private inputDebugSamples = 0;
+  private inputDebugClippedSamples = 0;
   private inputRmsSumSquares = 0;
   private inputRmsSamples = 0;
   private inputGain = 1;
   private normalizedWindowRms = 0;
+  private normalizedWindowPeak = 0;
   private lastDebugAt = 0;
 
   private smoothed = {
@@ -165,6 +171,10 @@ export class AudioService implements OnModuleDestroy {
       'AUDIO_NORMALIZE_TARGET_RMS',
       DEFAULT_NORMALIZE_TARGET_RMS,
     );
+    this.normalizeTargetPeak = this.getPositiveConfigNumber(
+      'AUDIO_NORMALIZE_TARGET_PEAK',
+      DEFAULT_NORMALIZE_TARGET_PEAK,
+    );
     this.normalizeMinGain = this.getPositiveConfigNumber(
       'AUDIO_NORMALIZE_MIN_GAIN',
       DEFAULT_NORMALIZE_MIN_GAIN,
@@ -197,9 +207,10 @@ export class AudioService implements OnModuleDestroy {
       return features;
     }
 
-    const windowRms = this.calculateCurrentWindowRms();
-    const gain = this.updateInputGain(windowRms);
-    this.normalizedWindowRms = windowRms * gain;
+    const windowStats = this.calculateCurrentWindowStats();
+    const gain = this.updateInputGain(windowStats.rms, windowStats.peak);
+    this.normalizedWindowRms = windowStats.rms * gain;
+    this.normalizedWindowPeak = windowStats.peak * gain;
 
     for (let i = 0; i < FFT_SIZE; i++) {
       const sourceIndex = (this.audioWriteIndex + i) % FFT_SIZE;
@@ -686,33 +697,48 @@ export class AudioService implements OnModuleDestroy {
     return prev + (curr - prev) * (curr > prev ? rise : fall);
   }
 
-  private calculateCurrentWindowRms() {
+  private calculateCurrentWindowStats() {
     let sumSquares = 0;
+    let peak = 0;
 
     for (let i = 0; i < FFT_SIZE; i++) {
       const sourceIndex = (this.audioWriteIndex + i) % FFT_SIZE;
       const sample = this.audioMono[sourceIndex];
+      peak = Math.max(peak, Math.abs(sample));
       sumSquares += sample * sample;
     }
 
-    return Math.sqrt(sumSquares / FFT_SIZE);
+    return {
+      rms: Math.sqrt(sumSquares / FFT_SIZE),
+      peak,
+    };
   }
 
-  private updateInputGain(windowRms: number) {
+  private updateInputGain(windowRms: number, windowPeak = windowRms) {
     if (!Number.isFinite(windowRms) || windowRms <= this.noiseFloorRms) {
       this.inputGain = this.smoothValue(1, this.inputGain, 0.08, 0.08);
       return this.inputGain;
     }
 
+    const desiredRmsGain =
+      this.normalizeTargetRms / Math.max(windowRms, this.noiseFloorRms);
+    const desiredPeakGain =
+      Number.isFinite(windowPeak) && windowPeak > this.noiseFloorRms
+        ? this.normalizeTargetPeak / windowPeak
+        : this.normalizeMaxGain;
     const desiredGain = this.clamp(
-      this.normalizeTargetRms / Math.max(windowRms, this.noiseFloorRms),
+      Math.min(desiredRmsGain, desiredPeakGain),
       this.normalizeMinGain,
       this.normalizeMaxGain,
     );
-    const rate =
-      desiredGain < this.inputGain ? GAIN_DECREASE_RATE : GAIN_INCREASE_RATE;
+    if (desiredGain < this.inputGain) {
+      const smoothedGain =
+        this.inputGain + (desiredGain - this.inputGain) * GAIN_DECREASE_RATE;
+      this.inputGain = Math.min(smoothedGain, desiredGain * MAX_GAIN_OVERSHOOT);
+      return this.inputGain;
+    }
 
-    this.inputGain += (desiredGain - this.inputGain) * rate;
+    this.inputGain += (desiredGain - this.inputGain) * GAIN_INCREASE_RATE;
     return this.inputGain;
   }
 
@@ -800,6 +826,9 @@ export class AudioService implements OnModuleDestroy {
 
     const abs = Math.abs(sample);
     this.inputDebugPeak = Math.max(this.inputDebugPeak, abs);
+    if (abs >= CLIP_WARNING_LEVEL) {
+      this.inputDebugClippedSamples++;
+    }
     this.inputDebugSumSquares += sample * sample;
     this.inputDebugSamples++;
   }
@@ -863,8 +892,10 @@ export class AudioService implements OnModuleDestroy {
         'Audio debug',
         `inRms=${debugInputRms.toFixed(4)}`,
         `normRms=${this.normalizedWindowRms.toFixed(4)}`,
+        `normPeak=${this.normalizedWindowPeak.toFixed(4)}`,
         `gain=${this.inputGain.toFixed(2)}`,
         `inPeak=${this.inputDebugPeak.toFixed(4)}`,
+        `clip=${this.getInputClipPercent().toFixed(1)}%`,
         `noiseFloor=${this.noiseFloorRms.toFixed(4)}`,
         `kick=${features.kick.toFixed(3)}`,
         `bass=${features.bass.toFixed(3)}`,
@@ -878,6 +909,12 @@ export class AudioService implements OnModuleDestroy {
     this.inputDebugSumSquares = 0;
     this.inputDebugPeak = 0;
     this.inputDebugSamples = 0;
+    this.inputDebugClippedSamples = 0;
+  }
+
+  private getInputClipPercent() {
+    if (this.inputDebugSamples === 0) return 0;
+    return (this.inputDebugClippedSamples / this.inputDebugSamples) * 100;
   }
 
   private resetAudioAnalysisState() {
@@ -890,6 +927,7 @@ export class AudioService implements OnModuleDestroy {
     this.inputEnvelopeSlow = 0;
     this.inputGain = this.smoothValue(1, this.inputGain, 0.08, 0.08);
     this.normalizedWindowRms = 0;
+    this.normalizedWindowPeak = 0;
   }
 
   private detectBeatFromLowEnergy(kickRaw: number, bassRaw: number) {
