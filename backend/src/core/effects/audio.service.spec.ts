@@ -5,11 +5,12 @@ import { AudioService } from './audio.service';
 type AudioServiceInternals = {
     updateInputGain(windowRms: number, windowPeak?: number): number;
     softLimitSample(sample: number): number;
-    bandTransient(
+    normalizeBand(
+        key: 'kick' | 'bass' | 'mid' | 'treble',
         raw: number,
-        baseline: number,
-        ratioThreshold: number,
-        exponent: number,
+        band: {
+            exponent: number;
+        },
     ): number;
 };
 
@@ -83,14 +84,23 @@ describe('AudioService normalization', () => {
         expect(service.softLimitSample(Number.NaN)).toBe(0);
     });
 
-    it('keeps band transients below saturation on sustained loud ratios', () => {
+    it('normalizes the same band shape across different input levels', () => {
         const service = createService() as unknown as AudioServiceInternals;
+        const band = { exponent: 1.1 };
 
-        const moderateTransient = service.bandTransient(2, 1, 1.1, 1.1);
-        const strongTransient = service.bandTransient(10, 1, 1.1, 1.1);
+        let quietLevel = 0;
+        for (let i = 0; i < 48; i++) {
+            quietLevel = service.normalizeBand('kick', 0.02, band);
+        }
 
-        expect(moderateTransient).toBeGreaterThan(0);
-        expect(moderateTransient).toBeLessThan(0.4);
-        expect(strongTransient).toBeLessThan(0.9);
+        let loudLevel = 0;
+        for (let i = 0; i < 48; i++) {
+            loudLevel = service.normalizeBand('kick', 0.2, band);
+        }
+
+        expect(quietLevel).toBeGreaterThan(0);
+        expect(loudLevel).toBeGreaterThan(0);
+        expect(Math.abs(loudLevel - quietLevel)).toBeLessThan(0.35);
+        expect(loudLevel).toBeLessThan(0.95);
     });
 });

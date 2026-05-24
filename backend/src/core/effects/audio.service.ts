@@ -26,9 +26,12 @@ const GAIN_DECREASE_RATE = 0.82;
 const GAIN_INCREASE_RATE = 0.1;
 const MAX_GAIN_OVERSHOOT = 1.35;
 const CLIP_WARNING_LEVEL = 0.95;
-const BAND_TRANSIENT_SOFTNESS = 1.65;
-const BASELINE_RISE_RATE = 0.035;
-const BASELINE_FALL_RATE = 0.025;
+const BAND_NORMALIZE_BOOST = 3.8;
+const BAND_FEATURE_CEILING = 0.88;
+const BAND_FLOOR_RISE_RATE = 0.003;
+const BAND_FLOOR_FALL_RATE = 0.08;
+const BAND_CEILING_RISE_RATE = 0.16;
+const BAND_CEILING_FALL_RATE = 0.006;
 const ENVELOPE_BEAT_THRESHOLD = 0.04;
 const ENVELOPE_BEAT_RATIO = 1.7;
 const ENVELOPE_BEAT_COOLDOWN_SAMPLES = Math.round(SAMPLE_RATE * 0.12);
@@ -73,6 +76,7 @@ const BAND_SETTINGS = {
 } as const;
 
 type BandSettings = (typeof BAND_SETTINGS)[keyof typeof BAND_SETTINGS];
+type BandKey = keyof typeof BAND_SETTINGS;
 
 export interface AudioFeatures {
   kick: number;
@@ -134,11 +138,18 @@ export class AudioService implements OnModuleDestroy {
     treble: 0,
   };
 
-  private baseline = {
+  private bandFloor: Record<BandKey, number> = {
     kick: 1e-3,
     bass: 1e-3,
     mid: 1e-3,
     treble: 1e-3,
+  };
+
+  private bandCeiling: Record<BandKey, number> = {
+    kick: 0.02,
+    bass: 0.02,
+    mid: 0.02,
+    treble: 0.02,
   };
 
   private dcBlockX = 0;
@@ -167,10 +178,7 @@ export class AudioService implements OnModuleDestroy {
     );
     this.alsaBufferMs = Math.max(
       this.alsaPeriodMs * 2,
-      this.getPositiveConfigInt(
-        'AUDIO_ALSA_BUFFER_MS',
-        DEFAULT_ALSA_BUFFER_MS,
-      ),
+      this.getPositiveConfigInt('AUDIO_ALSA_BUFFER_MS', DEFAULT_ALSA_BUFFER_MS),
     );
     this.normalizeTargetRms = this.getPositiveConfigNumber(
       'AUDIO_NORMALIZE_TARGET_RMS',
@@ -245,31 +253,13 @@ export class AudioService implements OnModuleDestroy {
     const midRaw = this.weightedBandRms(mags, binHz, BAND_SETTINGS.mid);
     const trebleRaw = this.weightedBandRms(mags, binHz, BAND_SETTINGS.treble);
 
-    this.updateBaseline(kickRaw, bassRaw, midRaw, trebleRaw);
-
-    const kickNorm = this.bandTransient(
-      kickRaw,
-      this.baseline.kick,
-      BAND_SETTINGS.kick.ratioThreshold,
-      BAND_SETTINGS.kick.exponent,
-    );
-    const bassNorm = this.bandTransient(
-      bassRaw,
-      this.baseline.bass,
-      BAND_SETTINGS.bass.ratioThreshold,
-      BAND_SETTINGS.bass.exponent,
-    );
-    const midNorm = this.bandTransient(
-      midRaw,
-      this.baseline.mid,
-      BAND_SETTINGS.mid.ratioThreshold,
-      BAND_SETTINGS.mid.exponent,
-    );
-    const trebleNorm = this.bandTransient(
+    const kickNorm = this.normalizeBand('kick', kickRaw, BAND_SETTINGS.kick);
+    const bassNorm = this.normalizeBand('bass', bassRaw, BAND_SETTINGS.bass);
+    const midNorm = this.normalizeBand('mid', midRaw, BAND_SETTINGS.mid);
+    const trebleNorm = this.normalizeBand(
+      'treble',
       trebleRaw,
-      this.baseline.treble,
-      BAND_SETTINGS.treble.ratioThreshold,
-      BAND_SETTINGS.treble.exponent,
+      BAND_SETTINGS.treble,
     );
 
     this.smoothed.kick = this.smoothValue(
@@ -765,11 +755,7 @@ export class AudioService implements OnModuleDestroy {
     return Math.tanh(sample);
   }
 
-  private weightedBandRms(
-    mags: number[],
-    binHz: number,
-    band: BandSettings,
-  ) {
+  private weightedBandRms(mags: number[], binHz: number, band: BandSettings) {
     const start = Math.max(1, Math.floor(band.fromHz / binHz));
     const end = Math.min(mags.length - 1, Math.ceil(band.toHz / binHz));
     let weightedPower = 0;
@@ -791,43 +777,40 @@ export class AudioService implements OnModuleDestroy {
     return weightSum > 0 ? Math.sqrt(weightedPower / weightSum) : 0;
   }
 
-  private noiseGate(value: number, threshold = 0.03) {
-    return value > threshold ? (value - threshold) / (1 - threshold) : 0;
-  }
-
   private shapeBand(value: number, exponent: number) {
     return Math.pow(this.clamp(value, 0, 1), exponent);
   }
 
-  private bandTransient(
-    raw: number,
-    baseline: number,
-    ratioThreshold: number,
-    exponent: number,
-  ) {
-    const ratio = raw / Math.max(baseline, 1e-6);
-    const excess = ratio - ratioThreshold;
-    if (!Number.isFinite(excess) || excess <= 0) return 0;
+  private normalizeBand(key: BandKey, raw: number, band: BandSettings) {
+    if (!Number.isFinite(raw) || raw <= 0) return 0;
 
-    const softKnee = excess / (excess + BAND_TRANSIENT_SOFTNESS);
-    return this.shapeBand(softKnee, exponent);
-  }
+    const currentFloor = this.bandFloor[key];
+    const floorRate =
+      raw < currentFloor ? BAND_FLOOR_FALL_RATE : BAND_FLOOR_RISE_RATE;
+    const floor = currentFloor + (raw - currentFloor) * floorRate;
 
-  private updateBaseline(
-    kick: number,
-    bass: number,
-    mid: number,
-    treble: number,
-  ) {
-    this.baseline.kick = this.smoothBaseline(this.baseline.kick, kick);
-    this.baseline.bass = this.smoothBaseline(this.baseline.bass, bass);
-    this.baseline.mid = this.smoothBaseline(this.baseline.mid, mid);
-    this.baseline.treble = this.smoothBaseline(this.baseline.treble, treble);
-  }
+    const currentCeiling = Math.max(this.bandCeiling[key], floor + 1e-4);
+    const ceilingTarget = Math.max(raw, floor * 1.35 + 1e-4);
+    const ceilingRate =
+      ceilingTarget > currentCeiling
+        ? BAND_CEILING_RISE_RATE
+        : BAND_CEILING_FALL_RATE;
+    const ceiling =
+      currentCeiling + (ceilingTarget - currentCeiling) * ceilingRate;
 
-  private smoothBaseline(current: number, target: number) {
-    const rate = target > current ? BASELINE_RISE_RATE : BASELINE_FALL_RATE;
-    return current + (target - current) * rate;
+    this.bandFloor[key] = floor;
+    this.bandCeiling[key] = Math.max(ceiling, floor + 1e-4);
+
+    const range = Math.max(this.bandCeiling[key] - floor, 1e-4);
+    const normalized = this.clamp((raw - floor) / range, 0, 1.4);
+    const compressed =
+      Math.log1p(normalized * BAND_NORMALIZE_BOOST) /
+      Math.log1p(BAND_NORMALIZE_BOOST);
+
+    return Math.min(
+      BAND_FEATURE_CEILING,
+      this.shapeBand(compressed, band.exponent),
+    );
   }
 
   private conditionInputSample(sample: number) {
@@ -943,6 +926,7 @@ export class AudioService implements OnModuleDestroy {
     this.smoothed.bass = this.smoothValue(0, this.smoothed.bass, 0.2, 0.2);
     this.smoothed.mid = this.smoothValue(0, this.smoothed.mid, 0.2, 0.2);
     this.smoothed.treble = this.smoothValue(0, this.smoothed.treble, 0.2, 0.2);
+    this.relaxBandRanges();
     this.pendingEnvelopeBeat = false;
     this.inputEnvelopeFast = 0;
     this.inputEnvelopeSlow = 0;
@@ -951,6 +935,23 @@ export class AudioService implements OnModuleDestroy {
     this.inputWindowPeak = 0;
     this.normalizedWindowRms = 0;
     this.normalizedWindowPeak = 0;
+  }
+
+  private relaxBandRanges() {
+    for (const key of Object.keys(this.bandFloor) as BandKey[]) {
+      this.bandFloor[key] = this.smoothValue(
+        1e-3,
+        this.bandFloor[key],
+        0.08,
+        0.08,
+      );
+      this.bandCeiling[key] = this.smoothValue(
+        0.02,
+        this.bandCeiling[key],
+        0.04,
+        0.04,
+      );
+    }
   }
 
   private detectBeatFromLowEnergy(kickRaw: number, bassRaw: number) {
