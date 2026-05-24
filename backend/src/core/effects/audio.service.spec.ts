@@ -12,6 +12,8 @@ type AudioServiceInternals = {
             exponent: number;
         },
     ): number;
+    calculateInputShapeSafety(windowRms: number, windowPeak: number): number;
+    calculateSpectralSafety(mags: number[], binHz: number): number;
 };
 
 describe('AudioService normalization', () => {
@@ -102,5 +104,27 @@ describe('AudioService normalization', () => {
         expect(loudLevel).toBeGreaterThan(0);
         expect(Math.abs(loudLevel - quietLevel)).toBeLessThan(0.35);
         expect(loudLevel).toBeLessThan(0.95);
+    });
+
+    it('reduces safety for clipped or over-compressed input shapes', () => {
+        const service = createService() as unknown as AudioServiceInternals;
+
+        expect(service.calculateInputShapeSafety(0.05, 0.26)).toBeGreaterThan(0.9);
+        expect(service.calculateInputShapeSafety(0.14, 0.19)).toBeLessThan(0.45);
+        expect(service.calculateInputShapeSafety(0.08, 0.96)).toBeLessThan(0.35);
+    });
+
+    it('reduces safety for broadband noisy spectra', () => {
+        const service = createService() as unknown as AudioServiceInternals;
+        const binHz = 44100 / 1024;
+        const noisy = Array(512).fill(1);
+        const peaky = Array(512).fill(1e-6);
+
+        peaky[Math.round(90 / binHz)] = 1;
+        peaky[Math.round(180 / binHz)] = 0.6;
+        peaky[Math.round(850 / binHz)] = 0.35;
+
+        expect(service.calculateSpectralSafety(peaky, binHz)).toBeGreaterThan(0.85);
+        expect(service.calculateSpectralSafety(noisy, binHz)).toBeLessThan(0.4);
     });
 });

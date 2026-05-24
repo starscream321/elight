@@ -101,10 +101,12 @@ describe('EffectsService effects', () => {
         }
 
         const clippedChannels = frame.filter((value) => value >= 250).length;
+        const maxChannel = frame.reduce((max, value) => Math.max(max, value), 0);
         const averageChannel =
             frame.reduce((sum, value) => sum + value, 0) / frame.length;
 
         expect(clippedChannels / frame.length).toBeLessThan(0.02);
-        expect(averageChannel).toBeLessThan(145);
+        expect(maxChannel).toBeLessThan(180);
+        expect(averageChannel).toBeLessThan(90);
     });
 });

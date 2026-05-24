@@ -109,7 +109,7 @@ export class EffectsService {
   private compressMusicValue(value: number): number {
     if (!Number.isFinite(value) || value <= 0) return 0;
 
-    return this.clamp(1 - Math.exp(-value * 0.95), 0, 0.74);
+    return this.clamp(value / (1 + value * 1.55), 0, 0.62);
   }
 
   private gaussian(distance: number, width: number): number {
@@ -297,7 +297,8 @@ export class EffectsService {
       0,
       1.5,
     );
-    const bassHit = spectrum.beat || transientPunch > 0.32;
+    const bassHit =
+      this.pulseAge > 0.11 && (spectrum.beat || transientPunch > 0.32);
     const dropHit =
       bassHit &&
       this.smoothEnergy > 0.55 &&
@@ -308,21 +309,21 @@ export class EffectsService {
       this.beatFlash = 1;
       this.pulseAge = 0;
       this.pulseStrength = this.clamp(
-        0.55 +
-          this.smoothKick * 0.45 +
-          this.smoothBass * 0.2 +
-          transientPunch * 0.18,
+        0.38 +
+          this.smoothKick * 0.34 +
+          this.smoothBass * 0.14 +
+          transientPunch * 0.12,
         0,
-        1.35,
+        1,
       );
       this.bassFrontAge = 0;
-      this.bassFrontStrength = this.clamp(0.48 + bassImpact * 0.82, 0, 1.65);
+      this.bassFrontStrength = this.clamp(0.32 + bassImpact * 0.58, 0, 1.15);
     }
 
     if (dropHit) {
       this.dropFlash = 1;
-      this.pulseStrength = Math.min(1.55, this.pulseStrength + 0.25);
-      this.bassFrontStrength = Math.min(1.85, this.bassFrontStrength + 0.35);
+      this.pulseStrength = Math.min(1.12, this.pulseStrength + 0.16);
+      this.bassFrontStrength = Math.min(1.25, this.bassFrontStrength + 0.22);
     }
 
     this.beatFlash = this.smoothAR(this.beatFlash, 0, 18, 11, safeDt);
@@ -389,10 +390,10 @@ export class EffectsService {
       (this.bassFrontAge * (1.35 + this.smoothKick * 0.55)) % 1;
     const brightnessMultiplier =
       safeBrightness *
-      (0.44 +
-        visualEnergy * 0.26 +
-        this.beatFlash * 0.05 +
-        this.dropFlash * 0.08);
+      (0.35 +
+        visualEnergy * 0.18 +
+        this.beatFlash * 0.035 +
+        this.dropFlash * 0.05);
 
     for (let i = 0; i < ledCount; i++) {
       const segment = this.getMusicSegmentPosition(i, ledCount);
@@ -427,13 +428,13 @@ export class EffectsService {
       const trailingBand = Math.pow(bassBand, 1.8);
       const trebleLayer = Math.pow(trebleBand, 3.5) * trebleDust;
       const baseWave =
-        0.12 +
-        ambientBreath * 0.018 +
-        this.smoothEnergy * 0.12 +
-        segmentAccent * (0.018 + this.smoothMid * 0.045) +
-        trailingBand * (0.08 + lowDrive * 0.25) +
-        leadingBand * (0.12 + melodicDensity * 0.36) +
-        trebleLayer * 0.08;
+        0.08 +
+        ambientBreath * 0.012 +
+        this.smoothEnergy * 0.06 +
+        segmentAccent * (0.012 + this.smoothMid * 0.025) +
+        trailingBand * (0.055 + lowDrive * 0.16) +
+        leadingBand * (0.08 + melodicDensity * 0.22) +
+        trebleLayer * 0.05;
 
       const delayedPulseAge = Math.max(
         0,
@@ -443,7 +444,7 @@ export class EffectsService {
       const pulseCore =
         this.gaussian(segment.centerDistance, pulseCoreWidth) *
         pulseCoreFade *
-        (0.45 + this.pulseStrength * 0.95);
+        (0.32 + this.pulseStrength * 0.62);
       const pulseShell =
         this.gaussian(
           Math.abs(segment.centerDistance - pulseRadius),
@@ -451,7 +452,7 @@ export class EffectsService {
         ) *
         pulseFade *
         this.pulseStrength *
-        1.35;
+        0.82;
       const edgeFrontDistance = Math.min(
         Math.abs(segment.localX - bassFrontCycle),
         Math.abs(1 - segment.localX - bassFrontCycle),
@@ -460,7 +461,7 @@ export class EffectsService {
         this.gaussian(edgeFrontDistance, bassFrontWidth) *
         bassFrontFade *
         this.bassFrontStrength *
-        1.35;
+        0.85;
 
       const sparkleSeed = this.fract(
         Math.sin(
@@ -506,9 +507,9 @@ export class EffectsService {
           sparkle * 1.35 +
           undertow +
           segmentChase +
-          transientPunch * 0.1 +
-          this.dropFlash * 0.12 +
-          this.beatFlash * 0.06) *
+          transientPunch * 0.06 +
+          this.dropFlash * 0.06 +
+          this.beatFlash * 0.035) *
         brightnessMultiplier;
 
       value = this.compressMusicValue(value);

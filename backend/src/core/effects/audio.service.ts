@@ -32,6 +32,13 @@ const BAND_FLOOR_RISE_RATE = 0.003;
 const BAND_FLOOR_FALL_RATE = 0.08;
 const BAND_CEILING_RISE_RATE = 0.16;
 const BAND_CEILING_FALL_RATE = 0.006;
+const INPUT_SAFETY_RISE_RATE = 0.18;
+const INPUT_SAFETY_FALL_RATE = 0.55;
+const DIRTY_SIGNAL_FLATNESS_START = 0.42;
+const DIRTY_SIGNAL_FLATNESS_FULL = 0.78;
+const LOW_CREST_RMS_THRESHOLD = 0.08;
+const LOW_CREST_START = 2.2;
+const LOW_CREST_FULL = 1.45;
 const ENVELOPE_BEAT_THRESHOLD = 0.04;
 const ENVELOPE_BEAT_RATIO = 1.7;
 const ENVELOPE_BEAT_COOLDOWN_SAMPLES = Math.round(SAMPLE_RATE * 0.12);
@@ -125,10 +132,12 @@ export class AudioService implements OnModuleDestroy {
   private inputRmsSumSquares = 0;
   private inputRmsSamples = 0;
   private inputGain = 1;
+  private inputSafety = 1;
   private inputWindowRms = 0;
   private inputWindowPeak = 0;
   private normalizedWindowRms = 0;
   private normalizedWindowPeak = 0;
+  private spectralFlatness = 0;
   private lastDebugAt = 0;
 
   private smoothed = {
@@ -247,6 +256,16 @@ export class AudioService implements OnModuleDestroy {
       .map(([re, im]: [number, number]) => Math.hypot(re, im));
 
     const binHz = SAMPLE_RATE / FFT_SIZE;
+    const safetyTarget = Math.min(
+      this.calculateInputShapeSafety(windowStats.rms, windowStats.peak),
+      this.calculateSpectralSafety(mags, binHz),
+    );
+    this.inputSafety = this.smoothValue(
+      safetyTarget,
+      this.inputSafety,
+      INPUT_SAFETY_RISE_RATE,
+      INPUT_SAFETY_FALL_RATE,
+    );
 
     const kickRaw = this.weightedBandRms(mags, binHz, BAND_SETTINGS.kick);
     const bassRaw = this.weightedBandRms(mags, binHz, BAND_SETTINGS.bass);
@@ -261,27 +280,31 @@ export class AudioService implements OnModuleDestroy {
       trebleRaw,
       BAND_SETTINGS.treble,
     );
+    const safeKickNorm = kickNorm * this.inputSafety;
+    const safeBassNorm = bassNorm * this.inputSafety;
+    const safeMidNorm = midNorm * this.inputSafety;
+    const safeTrebleNorm = trebleNorm * this.inputSafety;
 
     this.smoothed.kick = this.smoothValue(
-      kickNorm,
+      safeKickNorm,
       this.smoothed.kick,
       BAND_SETTINGS.kick.rise,
       BAND_SETTINGS.kick.fall,
     );
     this.smoothed.bass = this.smoothValue(
-      bassNorm,
+      safeBassNorm,
       this.smoothed.bass,
       BAND_SETTINGS.bass.rise,
       BAND_SETTINGS.bass.fall,
     );
     this.smoothed.mid = this.smoothValue(
-      midNorm,
+      safeMidNorm,
       this.smoothed.mid,
       BAND_SETTINGS.mid.rise,
       BAND_SETTINGS.mid.fall,
     );
     this.smoothed.treble = this.smoothValue(
-      trebleNorm,
+      safeTrebleNorm,
       this.smoothed.treble,
       BAND_SETTINGS.treble.rise,
       BAND_SETTINGS.treble.fall,
@@ -294,8 +317,9 @@ export class AudioService implements OnModuleDestroy {
       this.smoothed.treble * 0.05;
 
     const beat =
-      this.detectBeatFromLowEnergy(kickRaw, bassRaw) ||
-      this.consumeEnvelopeBeat();
+      this.inputSafety > 0.45 &&
+      (this.detectBeatFromLowEnergy(kickRaw, bassRaw) ||
+        this.consumeEnvelopeBeat());
 
     const features = {
       kick: this.smoothed.kick,
@@ -750,6 +774,63 @@ export class AudioService implements OnModuleDestroy {
     );
   }
 
+  private calculateInputShapeSafety(windowRms: number, windowPeak: number) {
+    if (!Number.isFinite(windowRms) || windowRms <= this.noiseFloorRms) {
+      return 1;
+    }
+
+    const peakSafety = 1 - this.smoothstep(0.82, 0.98, windowPeak);
+    const crest = windowPeak / Math.max(windowRms, 1e-6);
+    const crestPenalty =
+      windowRms > LOW_CREST_RMS_THRESHOLD
+        ? this.smoothstep(LOW_CREST_START, LOW_CREST_FULL, crest)
+        : 0;
+
+    return this.clamp(Math.min(peakSafety, 1 - crestPenalty * 0.78), 0.18, 1);
+  }
+
+  private calculateSpectralSafety(mags: number[], binHz: number) {
+    const start = Math.max(1, Math.floor(45 / binHz));
+    const end = Math.min(mags.length - 1, Math.ceil(9000 / binHz));
+    let logSum = 0;
+    let linearSum = 0;
+    let count = 0;
+
+    for (let i = start; i <= end; i++) {
+      const value = mags[i];
+      if (!Number.isFinite(value) || value <= 0) continue;
+
+      logSum += Math.log(value + 1e-9);
+      linearSum += value;
+      count++;
+    }
+
+    if (count === 0 || linearSum <= 0) {
+      this.spectralFlatness = 0;
+      return 1;
+    }
+
+    const geometricMean = Math.exp(logSum / count);
+    const arithmeticMean = linearSum / count;
+    const flatness = this.clamp(geometricMean / arithmeticMean, 0, 1);
+    this.spectralFlatness = flatness;
+
+    const dirtyAmount = this.smoothstep(
+      DIRTY_SIGNAL_FLATNESS_START,
+      DIRTY_SIGNAL_FLATNESS_FULL,
+      flatness,
+    );
+
+    return this.clamp(1 - dirtyAmount * 0.72, 0.28, 1);
+  }
+
+  private smoothstep(edge0: number, edge1: number, value: number) {
+    if (edge0 === edge1) return value >= edge1 ? 1 : 0;
+
+    const t = this.clamp((value - edge0) / (edge1 - edge0), 0, 1);
+    return t * t * (3 - 2 * t);
+  }
+
   private softLimitSample(sample: number) {
     if (!Number.isFinite(sample)) return 0;
     return Math.tanh(sample);
@@ -898,6 +979,8 @@ export class AudioService implements OnModuleDestroy {
         `normRms=${this.normalizedWindowRms.toFixed(4)}`,
         `normPeak=${this.normalizedWindowPeak.toFixed(4)}`,
         `gain=${this.inputGain.toFixed(2)}`,
+        `safety=${this.inputSafety.toFixed(2)}`,
+        `flatness=${this.spectralFlatness.toFixed(2)}`,
         `inPeak=${this.inputDebugPeak.toFixed(4)}`,
         `clip=${this.getInputClipPercent().toFixed(1)}%`,
         `noiseFloor=${this.noiseFloorRms.toFixed(4)}`,
@@ -931,10 +1014,12 @@ export class AudioService implements OnModuleDestroy {
     this.inputEnvelopeFast = 0;
     this.inputEnvelopeSlow = 0;
     this.inputGain = this.smoothValue(1, this.inputGain, 0.08, 0.08);
+    this.inputSafety = this.smoothValue(1, this.inputSafety, 0.08, 0.08);
     this.inputWindowRms = 0;
     this.inputWindowPeak = 0;
     this.normalizedWindowRms = 0;
     this.normalizedWindowPeak = 0;
+    this.spectralFlatness = 0;
   }
 
   private relaxBandRanges() {
