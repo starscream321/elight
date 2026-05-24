@@ -60,27 +60,50 @@ describe('EffectsService effects', () => {
         }
     });
 
-    it('music spreads beat pulses across eight logical segments', async () => {
-        const ledCount = 80;
+    const averageSegmentBand = (
+        frame: Uint8Array,
+        ledCount: number,
+        segmentIndex: number,
+        bandIndex: number,
+    ) => {
+        const segmentSize = ledCount / 8;
+        const start = Math.floor(segmentIndex * segmentSize + (bandIndex * segmentSize) / 4);
+        const end = Math.floor(segmentIndex * segmentSize + ((bandIndex + 1) * segmentSize) / 4);
+        let total = 0;
+        let count = 0;
+
+        for (let led = start; led < end; led++) {
+            total += pixelLevel(frame, led);
+            count++;
+        }
+
+        return count > 0 ? total / count : 0;
+    };
+
+    it('music maps frequency bands to fixed zones inside each segment', async () => {
+        (audioService.getAudioSpectrum as jest.Mock).mockReturnValue({
+            kick: 1,
+            bass: 0.05,
+            mid: 0.05,
+            treble: 0.05,
+            energy: 0.35,
+            beat: false,
+        });
+
+        const ledCount = 160;
         const frame = await service.music(ledCount, 1000, 0.7, 0);
         const segmentSize = ledCount / 8;
+        const firstSegmentKick = averageSegmentBand(frame, ledCount, 0, 0);
+        const firstSegmentBass = averageSegmentBand(frame, ledCount, 0, 1);
+        const firstSegmentMid = averageSegmentBand(frame, ledCount, 0, 2);
+        const firstSegmentTreble = averageSegmentBand(frame, ledCount, 0, 3);
+        const repeatedSegmentKick = averageSegmentBand(frame, ledCount, 4, 0);
 
-        const centers = Array.from({ length: 8 }, (_, segment) =>
-            Math.floor(segment * segmentSize + segmentSize / 2),
-        );
-        const shoulders = Array.from({ length: 8 }, (_, segment) =>
-            Math.floor(segment * segmentSize + segmentSize * 0.25),
-        );
-
-        const centerAverage =
-            centers.reduce((sum, led) => sum + pixelLevel(frame, led), 0) /
-            centers.length;
-        const shoulderAverage =
-            shoulders.reduce((sum, led) => sum + pixelLevel(frame, led), 0) /
-            shoulders.length;
-
-        expect(Math.min(...centers.map((led) => pixelLevel(frame, led)))).toBeGreaterThan(40);
-        expect(centerAverage).toBeGreaterThan(shoulderAverage * 1.2);
+        expect(segmentSize).toBe(20);
+        expect(firstSegmentKick).toBeGreaterThan(firstSegmentBass * 1.4);
+        expect(firstSegmentKick).toBeGreaterThan(firstSegmentMid * 1.4);
+        expect(firstSegmentKick).toBeGreaterThan(firstSegmentTreble * 1.4);
+        expect(repeatedSegmentKick).toBeGreaterThan(firstSegmentBass * 1.4);
     });
 
     it('music compresses sustained high input instead of clipping the frame', async () => {
