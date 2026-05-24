@@ -336,83 +336,100 @@ export class EffectsService {
     this.dropFlash = this.smoothAR(this.dropFlash, 0, 24, 6.2, safeDt);
 
     const flowDt = safeDt * this.SPEED_MUSIC;
-    this.musicFlow += flowDt * (0.08 + this.smoothEnergy * 0.35);
-    this.musicTexture += flowDt * (0.45 + this.smoothTreble * 0.85);
+    this.musicFlow +=
+      flowDt *
+      (0.34 +
+        this.smoothBass * 0.7 +
+        this.smoothKick * 0.45 +
+        this.beatFlash * 0.32);
+    this.musicTexture +=
+      flowDt * (0.42 + this.smoothMid * 0.4 + this.smoothTreble * 1.1);
 
     const fullWavePhase = this.musicFlow * Math.PI * 2;
     const texturePhase = this.musicTexture * Math.PI * 2;
     void hueBase;
 
-    const bandLevels = [
-      this.clamp(this.smoothKick + this.beatFlash * 0.18, 0, 1),
-      this.clamp(this.smoothBass + this.bassFrontStrength * 0.1, 0, 1),
-      this.clamp(this.smoothMid + this.dropFlash * 0.08, 0, 1),
-      this.clamp(this.smoothTreble + this.beatFlash * 0.04, 0, 1),
-    ];
-    const bandHues = [8, 42, 184, 275];
-    const bandWeights = [1, 0.9, 0.78, 0.72];
+    const lowDrive = this.clamp(
+      this.smoothKick * 0.7 + this.smoothBass * 0.45 + this.beatFlash * 0.25,
+      0,
+      1.25,
+    );
+    const colorDrive = this.clamp(
+      this.smoothMid * 0.65 + this.smoothTreble * 0.55 + this.dropFlash * 0.18,
+      0,
+      1.25,
+    );
+    const tailLength = 0.11 + lowDrive * 0.09 + this.smoothMid * 0.035;
+    const headWidth = 0.018 + this.pulseStrength * 0.014;
+    const sparkleAmount = this.clamp(
+      this.smoothTreble * 0.75 + this.beatFlash * 0.2,
+      0,
+      1,
+    );
     const brightnessMultiplier =
-      safeBrightness * (0.42 + this.clamp(this.smoothEnergy, 0, 1) * 0.22);
+      safeBrightness *
+      (0.42 +
+        this.clamp(this.smoothEnergy, 0, 1) * 0.28 +
+        this.beatFlash * 0.04);
 
     for (let i = 0; i < ledCount; i++) {
       const segment = this.getMusicSegmentPosition(i, ledCount);
-      const bandPosition = segment.orientedX * bandLevels.length;
-      const bandIndex = this.clamp(
-        Math.floor(bandPosition),
-        0,
-        bandLevels.length - 1,
-      );
-      const localBandX = bandPosition - bandIndex;
-      const level = bandLevels[bandIndex];
-      const fill = this.clamp(level * 0.88 + 0.08, 0.04, 0.96);
-      const barPosition = bandIndex < 2 ? localBandX : 1 - localBandX;
-      const filled = barPosition <= fill ? 1 : 0;
-      const edgeDistance = Math.abs(barPosition - fill);
-      const cap = Math.max(0, 1 - edgeDistance / 0.1);
-      const gridGap = localBandX < 0.035 || localBandX > 0.965 ? 0.2 : 1;
-      const scan =
+      const head =
+        (this.musicFlow * (0.85 + segment.phase * 0.22) +
+          segment.phase * 0.31) %
+        1;
+      const mirrorHead = 1 - head;
+      const distance = this.circularDistance(segment.orientedX, head);
+      const mirrorDistance = this.circularDistance(segment.orientedX, mirrorHead);
+      const primaryTail = Math.max(0, 1 - distance / tailLength);
+      const secondaryTail = Math.max(0, 1 - mirrorDistance / (tailLength * 0.72));
+      const headCore =
+        this.gaussian(distance, headWidth) * (0.52 + this.pulseStrength * 0.42);
+      const mirroredCore =
+        this.gaussian(mirrorDistance, headWidth * 1.25) *
+        (0.18 + this.smoothBass * 0.18);
+      const bpmWave =
         Math.sin(
-          (localBandX * 3.5 + segment.phase * 0.6 + bandIndex * 0.17) *
-            Math.PI *
-            2 -
+          (segment.localX * 2.2 + segment.phase * 0.9) * Math.PI * 2 -
             fullWavePhase,
         ) *
           0.5 +
         0.5;
-      const texture =
+      const body =
+        Math.pow(primaryTail, 1.65) * (0.26 + lowDrive * 0.56) +
+        Math.pow(secondaryTail, 2.1) * (0.12 + this.smoothMid * 0.2) +
+        headCore +
+        mirroredCore +
+        bpmWave * this.smoothEnergy * 0.08;
+      const sparkleSeed = this.fract(
         Math.sin(
-          (segment.localX * 17 + bandIndex * 3.1) * Math.PI * 2 +
-            texturePhase * (bandIndex + 1) * 0.55,
-        ) *
-          0.5 +
-        0.5;
-      const tick = Math.floor(barPosition * 12) / 12 < fill ? 0.045 : 0;
-      const bandGlow =
-        0.04 +
-        filled * (0.18 + level * 0.62 + scan * 0.08) +
-        cap * (0.08 + level * 0.22) +
-        tick +
-        texture * level * (bandIndex === 3 ? 0.06 : 0.025);
-      const segmentPulse =
-        this.beatFlash *
-        (bandIndex < 2 ? 0.06 : 0.025) *
-        (1 - segment.centerDistance * 0.8);
+          i * 12.9898 +
+            segment.segmentIndex * 78.233 +
+            this.musicTexture * 24.17,
+        ) * 43758.5453,
+      );
+      const sparkleGate = 0.993 - sparkleAmount * 0.055;
+      const sparkle =
+        sparkleSeed > sparkleGate
+          ? Math.pow((sparkleSeed - sparkleGate) / (1 - sparkleGate), 2.2) *
+            (0.18 + sparkleAmount * 0.4)
+          : 0;
       const value = this.compressMusicValue(
-        (bandGlow * bandWeights[bandIndex] + segmentPulse) *
-          brightnessMultiplier *
-          gridGap,
+        (0.025 + body + sparkle + transientPunch * 0.045) *
+          brightnessMultiplier,
       );
 
       const hue =
-        (bandHues[bandIndex] +
-          segment.segmentIndex * 3 +
-          scan * 6 +
-          cap * 10 -
-          texture * 4) %
+        (265 +
+          colorDrive * 72 +
+          lowDrive * -34 +
+          segment.phase * 28 +
+          segment.orientedX * 18 +
+          Math.sin(texturePhase + segment.phase * Math.PI * 2) * 12) %
         360;
       const saturation = this.clamp(
-        0.72 + level * 0.18 - cap * 0.08,
-        0.48,
+        0.86 - headCore * 0.18 - sparkle * 0.5 + this.smoothTreble * 0.08,
+        0.34,
         1,
       );
       writeHsvToRgb(pixels, i * 3, hue, saturation, value);
