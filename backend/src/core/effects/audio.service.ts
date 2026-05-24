@@ -32,6 +32,11 @@ const BAND_FLOOR_RISE_RATE = 0.003;
 const BAND_FLOOR_FALL_RATE = 0.08;
 const BAND_CEILING_RISE_RATE = 0.16;
 const BAND_CEILING_FALL_RATE = 0.006;
+const COLOR_MUSIC_AVERAGE_RISE = 0.025;
+const COLOR_MUSIC_AVERAGE_FALL = 0.006;
+const COLOR_MUSIC_GATE_ADD = 0.035;
+const COLOR_MUSIC_BODY_MIX = 0.28;
+const COLOR_MUSIC_FLASH_DECAY = 0.055;
 const INPUT_SAFETY_RISE_RATE = 0.18;
 const INPUT_SAFETY_FALL_RATE = 0.55;
 const DIRTY_SIGNAL_FLATNESS_START = 0.42;
@@ -161,6 +166,20 @@ export class AudioService implements OnModuleDestroy {
     treble: 0.02,
   };
 
+  private bandAverage: Record<BandKey, number> = {
+    kick: 0.08,
+    bass: 0.08,
+    mid: 0.08,
+    treble: 0.08,
+  };
+
+  private bandFlashHold: Record<BandKey, number> = {
+    kick: 0,
+    bass: 0,
+    mid: 0,
+    treble: 0,
+  };
+
   private dcBlockX = 0;
   private dcBlockY = 0;
   private beatCooldown = 0;
@@ -280,10 +299,18 @@ export class AudioService implements OnModuleDestroy {
       trebleRaw,
       BAND_SETTINGS.treble,
     );
-    const safeKickNorm = kickNorm * this.inputSafety;
-    const safeBassNorm = bassNorm * this.inputSafety;
-    const safeMidNorm = midNorm * this.inputSafety;
-    const safeTrebleNorm = trebleNorm * this.inputSafety;
+    const safeKickNorm =
+      this.colorMusicGate('kick', kickNorm, BAND_SETTINGS.kick) *
+      this.inputSafety;
+    const safeBassNorm =
+      this.colorMusicGate('bass', bassNorm, BAND_SETTINGS.bass) *
+      this.inputSafety;
+    const safeMidNorm =
+      this.colorMusicGate('mid', midNorm, BAND_SETTINGS.mid) *
+      this.inputSafety;
+    const safeTrebleNorm =
+      this.colorMusicGate('treble', trebleNorm, BAND_SETTINGS.treble) *
+      this.inputSafety;
 
     this.smoothed.kick = this.smoothValue(
       safeKickNorm,
@@ -894,6 +921,44 @@ export class AudioService implements OnModuleDestroy {
     );
   }
 
+  private colorMusicGate(key: BandKey, value: number, band: BandSettings) {
+    if (!Number.isFinite(value) || value <= 0) {
+      this.bandFlashHold[key] = Math.max(
+        0,
+        this.bandFlashHold[key] - COLOR_MUSIC_FLASH_DECAY,
+      );
+      return 0;
+    }
+
+    const currentAverage = this.bandAverage[key];
+    const average = this.smoothValue(
+      value,
+      currentAverage,
+      COLOR_MUSIC_AVERAGE_RISE,
+      COLOR_MUSIC_AVERAGE_FALL,
+    );
+    this.bandAverage[key] = this.clamp(average, 0.025, 0.82);
+
+    const threshold = this.clamp(
+      this.bandAverage[key] * band.ratioThreshold + COLOR_MUSIC_GATE_ADD,
+      0.055,
+      0.88,
+    );
+    const flash =
+      value > threshold ? this.clamp((value - threshold) / (1 - threshold), 0, 1) : 0;
+    this.bandFlashHold[key] = Math.max(
+      flash,
+      Math.max(0, this.bandFlashHold[key] - COLOR_MUSIC_FLASH_DECAY),
+    );
+
+    const body = value * COLOR_MUSIC_BODY_MIX;
+    return this.clamp(
+      Math.max(body, this.bandFlashHold[key]),
+      0,
+      BAND_FEATURE_CEILING,
+    );
+  }
+
   private conditionInputSample(sample: number) {
     const clipped = this.clamp(sample, -0.98, 0.98);
     const filtered = clipped - this.dcBlockX + 0.995 * this.dcBlockY;
@@ -1010,6 +1075,7 @@ export class AudioService implements OnModuleDestroy {
     this.smoothed.mid = this.smoothValue(0, this.smoothed.mid, 0.2, 0.2);
     this.smoothed.treble = this.smoothValue(0, this.smoothed.treble, 0.2, 0.2);
     this.relaxBandRanges();
+    this.relaxColorMusicGates();
     this.pendingEnvelopeBeat = false;
     this.inputEnvelopeFast = 0;
     this.inputEnvelopeSlow = 0;
@@ -1035,6 +1101,21 @@ export class AudioService implements OnModuleDestroy {
         this.bandCeiling[key],
         0.04,
         0.04,
+      );
+    }
+  }
+
+  private relaxColorMusicGates() {
+    for (const key of Object.keys(this.bandAverage) as BandKey[]) {
+      this.bandAverage[key] = this.smoothValue(
+        0.08,
+        this.bandAverage[key],
+        0.04,
+        0.04,
+      );
+      this.bandFlashHold[key] = Math.max(
+        0,
+        this.bandFlashHold[key] - COLOR_MUSIC_FLASH_DECAY,
       );
     }
   }

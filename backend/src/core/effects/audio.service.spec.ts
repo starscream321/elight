@@ -14,6 +14,13 @@ type AudioServiceInternals = {
     ): number;
     calculateInputShapeSafety(windowRms: number, windowPeak: number): number;
     calculateSpectralSafety(mags: number[], binHz: number): number;
+    colorMusicGate(
+        key: 'kick' | 'bass' | 'mid' | 'treble',
+        value: number,
+        band: {
+            ratioThreshold: number;
+        },
+    ): number;
 };
 
 describe('AudioService normalization', () => {
@@ -126,5 +133,24 @@ describe('AudioService normalization', () => {
 
         expect(service.calculateSpectralSafety(peaky, binHz)).toBeGreaterThan(0.85);
         expect(service.calculateSpectralSafety(noisy, binHz)).toBeLessThan(0.4);
+    });
+
+    it('keeps steady bands restrained and passes relative frequency flashes', () => {
+        const service = createService() as unknown as AudioServiceInternals;
+        const band = { ratioThreshold: 1.2 };
+
+        let steady = 0;
+        for (let i = 0; i < 64; i++) {
+            steady = service.colorMusicGate('kick', 0.32, band);
+        }
+
+        const flash = service.colorMusicGate('kick', 0.72, band);
+        const afterFlash = service.colorMusicGate('kick', 0.18, band);
+
+        expect(steady).toBeGreaterThan(0);
+        expect(steady).toBeLessThan(0.12);
+        expect(flash).toBeGreaterThan(steady * 2.5);
+        expect(afterFlash).toBeGreaterThan(0.05);
+        expect(afterFlash).toBeLessThan(flash);
     });
 });
