@@ -22,6 +22,13 @@ const DEFAULT_NORMALIZE_TARGET_RMS = 0.06;
 const DEFAULT_NORMALIZE_TARGET_PEAK = 0.35;
 const DEFAULT_NORMALIZE_MIN_GAIN = 0.05;
 const DEFAULT_NORMALIZE_MAX_GAIN = 7;
+const SPECTRUM_BIN_COUNT = 30;
+const SPECTRUM_MIN_HZ = 70;
+const SPECTRUM_MAX_HZ = 9000;
+const SPECTRUM_AVERAGE_RISE = 0.08;
+const SPECTRUM_AVERAGE_FALL = 0.018;
+const SPECTRUM_HOLD_DECAY = 0.05;
+const SPECTRUM_MAX_COEF = 1.15;
 const GAIN_DECREASE_RATE = 0.82;
 const GAIN_INCREASE_RATE = 0.1;
 const MAX_GAIN_OVERSHOOT = 1.35;
@@ -97,6 +104,7 @@ export interface AudioFeatures {
   treble: number;
   energy: number;
   beat: boolean;
+  spectrum: number[];
 }
 
 type AudioSourceKind = 'alsa' | 'pulse';
@@ -179,6 +187,9 @@ export class AudioService implements OnModuleDestroy {
     mid: 0,
     treble: 0,
   };
+
+  private readonly spectrumBins = new Float32Array(SPECTRUM_BIN_COUNT);
+  private spectrumAverageMax = 0.02;
 
   private dcBlockX = 0;
   private dcBlockY = 0;
@@ -311,6 +322,9 @@ export class AudioService implements OnModuleDestroy {
     const safeTrebleNorm =
       this.colorMusicGate('treble', trebleNorm, BAND_SETTINGS.treble) *
       this.inputSafety;
+    const frequencyBins = this.calculateSpectrumBins(mags, binHz).map(
+      (value) => value * this.inputSafety,
+    );
 
     this.smoothed.kick = this.smoothValue(
       safeKickNorm,
@@ -355,6 +369,7 @@ export class AudioService implements OnModuleDestroy {
       treble: this.smoothed.treble,
       energy,
       beat,
+      spectrum: frequencyBins,
     };
 
     this.logDebug(features, currentInputRms);
@@ -885,6 +900,69 @@ export class AudioService implements OnModuleDestroy {
     return weightSum > 0 ? Math.sqrt(weightedPower / weightSum) : 0;
   }
 
+  private calculateSpectrumBins(mags: number[], binHz: number) {
+    const rawBins = new Array<number>(SPECTRUM_BIN_COUNT).fill(0);
+    let frameMax = 0;
+
+    for (let i = 0; i < SPECTRUM_BIN_COUNT; i++) {
+      const fromHz =
+        SPECTRUM_MIN_HZ *
+        Math.pow(SPECTRUM_MAX_HZ / SPECTRUM_MIN_HZ, i / SPECTRUM_BIN_COUNT);
+      const toHz =
+        SPECTRUM_MIN_HZ *
+        Math.pow(
+          SPECTRUM_MAX_HZ / SPECTRUM_MIN_HZ,
+          (i + 1) / SPECTRUM_BIN_COUNT,
+        );
+      const value = this.spectrumBandPeak(mags, binHz, fromHz, toHz);
+
+      rawBins[i] = value;
+      frameMax = Math.max(frameMax, value);
+    }
+
+    if (frameMax <= 1e-6) {
+      this.relaxSpectrumBins();
+      return Array.from(this.spectrumBins);
+    }
+
+    this.spectrumAverageMax = this.smoothValue(
+      frameMax,
+      this.spectrumAverageMax,
+      SPECTRUM_AVERAGE_RISE,
+      SPECTRUM_AVERAGE_FALL,
+    );
+    const scale = Math.max(this.spectrumAverageMax * SPECTRUM_MAX_COEF, 1e-6);
+    const noiseGate = scale * 0.025;
+
+    for (let i = 0; i < SPECTRUM_BIN_COUNT; i++) {
+      const raw = rawBins[i] < noiseGate ? 0 : rawBins[i];
+      const held = Math.max(raw, this.spectrumBins[i] * scale - scale * SPECTRUM_HOLD_DECAY);
+      const normalized = this.clamp(held / scale, 0, 1);
+
+      this.spectrumBins[i] = Math.pow(normalized, 0.72);
+    }
+
+    return Array.from(this.spectrumBins);
+  }
+
+  private spectrumBandPeak(
+    mags: number[],
+    binHz: number,
+    fromHz: number,
+    toHz: number,
+  ) {
+    const start = Math.max(1, Math.floor(fromHz / binHz));
+    const end = Math.min(mags.length - 1, Math.ceil(toHz / binHz));
+    let peak = 0;
+
+    for (let i = start; i <= end; i++) {
+      const value = mags[i];
+      if (Number.isFinite(value)) peak = Math.max(peak, value);
+    }
+
+    return peak;
+  }
+
   private shapeBand(value: number, exponent: number) {
     return Math.pow(this.clamp(value, 0, 1), exponent);
   }
@@ -1076,6 +1154,7 @@ export class AudioService implements OnModuleDestroy {
     this.smoothed.treble = this.smoothValue(0, this.smoothed.treble, 0.2, 0.2);
     this.relaxBandRanges();
     this.relaxColorMusicGates();
+    this.relaxSpectrumBins();
     this.pendingEnvelopeBeat = false;
     this.inputEnvelopeFast = 0;
     this.inputEnvelopeSlow = 0;
@@ -1117,6 +1196,18 @@ export class AudioService implements OnModuleDestroy {
         0,
         this.bandFlashHold[key] - COLOR_MUSIC_FLASH_DECAY,
       );
+    }
+  }
+
+  private relaxSpectrumBins() {
+    this.spectrumAverageMax = this.smoothValue(
+      0.02,
+      this.spectrumAverageMax,
+      0.04,
+      0.04,
+    );
+    for (let i = 0; i < this.spectrumBins.length; i++) {
+      this.spectrumBins[i] = Math.max(0, this.spectrumBins[i] - 0.08);
     }
   }
 
@@ -1176,6 +1267,14 @@ export class AudioService implements OnModuleDestroy {
   }
 
   private emptyFeatures(): AudioFeatures {
-    return { kick: 0, bass: 0, mid: 0, treble: 0, energy: 0, beat: false };
+    return {
+      kick: 0,
+      bass: 0,
+      mid: 0,
+      treble: 0,
+      energy: 0,
+      beat: false,
+      spectrum: new Array(SPECTRUM_BIN_COUNT).fill(0),
+    };
   }
 }

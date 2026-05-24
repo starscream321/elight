@@ -10,6 +10,9 @@ describe('EffectsService effects', () => {
         treble: 0.3,
         energy: 0.6,
         beat: true,
+        spectrum: Array.from({ length: 30 }, (_, index) =>
+            index < 8 ? 0.7 : index < 18 ? 0.45 : 0.25,
+        ),
     };
     const audioService = {
         getAudioSpectrum: jest.fn(() => defaultSpectrum),
@@ -73,34 +76,34 @@ describe('EffectsService effects', () => {
         return levels;
     };
 
-    it('music renders sinelon heads with trailing energy in each segment', async () => {
+    it('music maps many frequency bins symmetrically inside each segment', async () => {
+        const spectrumBins = new Array(30).fill(0.05);
+        spectrumBins[0] = 1;
+        spectrumBins[14] = 0.62;
+        spectrumBins[29] = 0.9;
         (audioService.getAudioSpectrum as jest.Mock).mockReturnValue({
-            kick: 0.9,
-            bass: 0.75,
-            mid: 0.35,
-            treble: 0.25,
-            energy: 0.7,
-            beat: true,
+            kick: 0.8,
+            bass: 0.55,
+            mid: 0.4,
+            treble: 0.7,
+            energy: 0.75,
+            beat: false,
+            spectrum: spectrumBins,
         });
 
-        const ledCount = 160;
-        let frame = new Uint8Array(ledCount * 3);
+        const ledCount = 240;
+        const frame = await service.music(ledCount, 1000, 0.8, 0);
+        const levels = segmentLevels(frame, ledCount, 0);
+        const center = levels[Math.floor(levels.length / 2)];
+        const leftEdge = levels[0];
+        const rightEdge = levels[levels.length - 1];
+        const quarter = levels[Math.floor(levels.length * 0.25)];
+        const quietBin = levels[Math.floor(levels.length * 0.38)];
 
-        for (let frameIndex = 0; frameIndex < 8; frameIndex++) {
-            frame = await service.music(ledCount, 1000 + frameIndex * 16, 0.7, 0);
-        }
-
-        for (let segmentIndex = 0; segmentIndex < 8; segmentIndex++) {
-            const levels = segmentLevels(frame, ledCount, segmentIndex);
-            const max = Math.max(...levels);
-            const average =
-                levels.reduce((sum, level) => sum + level, 0) / levels.length;
-            const litPixels = levels.filter((level) => level > average * 1.25).length;
-
-            expect(max).toBeGreaterThan(average * 1.6);
-            expect(litPixels).toBeGreaterThan(1);
-            expect(litPixels).toBeLessThan(levels.length);
-        }
+        expect(center).toBeGreaterThan(quietBin * 1.5);
+        expect(leftEdge).toBeGreaterThan(quietBin * 1.4);
+        expect(rightEdge).toBeGreaterThan(quietBin * 1.4);
+        expect(quarter).toBeGreaterThan(quietBin);
     });
 
     it('music compresses sustained high input instead of clipping the frame', async () => {
@@ -111,6 +114,7 @@ describe('EffectsService effects', () => {
             treble: 0.95,
             energy: 0.95,
             beat: true,
+            spectrum: new Array(30).fill(0.95),
         });
 
         const ledCount = 128;

@@ -336,100 +336,93 @@ export class EffectsService {
     this.dropFlash = this.smoothAR(this.dropFlash, 0, 24, 6.2, safeDt);
 
     const flowDt = safeDt * this.SPEED_MUSIC;
-    this.musicFlow +=
-      flowDt *
-      (0.34 +
-        this.smoothBass * 0.7 +
-        this.smoothKick * 0.45 +
-        this.beatFlash * 0.32);
+    this.musicFlow += flowDt * (0.18 + this.smoothEnergy * 0.36);
     this.musicTexture +=
-      flowDt * (0.42 + this.smoothMid * 0.4 + this.smoothTreble * 1.1);
+      flowDt * (0.28 + this.smoothTreble * 0.72 + this.beatFlash * 0.28);
 
     const fullWavePhase = this.musicFlow * Math.PI * 2;
     const texturePhase = this.musicTexture * Math.PI * 2;
     void hueBase;
 
-    const lowDrive = this.clamp(
-      this.smoothKick * 0.7 + this.smoothBass * 0.45 + this.beatFlash * 0.25,
-      0,
-      1.25,
-    );
-    const colorDrive = this.clamp(
-      this.smoothMid * 0.65 + this.smoothTreble * 0.55 + this.dropFlash * 0.18,
-      0,
-      1.25,
-    );
-    const tailLength = 0.11 + lowDrive * 0.09 + this.smoothMid * 0.035;
-    const headWidth = 0.018 + this.pulseStrength * 0.014;
-    const sparkleAmount = this.clamp(
-      this.smoothTreble * 0.75 + this.beatFlash * 0.2,
-      0,
-      1,
-    );
+    const frequencyBins =
+      spectrum.spectrum?.length > 0
+        ? spectrum.spectrum
+        : [
+            this.smoothKick,
+            this.smoothBass,
+            this.smoothBass,
+            this.smoothMid,
+            this.smoothMid,
+            this.smoothTreble,
+          ];
+    const maxFrequency = Math.max(0.12, ...frequencyBins);
     const brightnessMultiplier =
       safeBrightness *
-      (0.42 +
-        this.clamp(this.smoothEnergy, 0, 1) * 0.28 +
-        this.beatFlash * 0.04);
+      (0.56 +
+        this.clamp(this.smoothEnergy, 0, 1) * 0.42 +
+        this.beatFlash * 0.08);
 
     for (let i = 0; i < ledCount; i++) {
       const segment = this.getMusicSegmentPosition(i, ledCount);
-      const head =
-        (this.musicFlow * (0.85 + segment.phase * 0.22) +
-          segment.phase * 0.31) %
-        1;
-      const mirrorHead = 1 - head;
-      const distance = this.circularDistance(segment.orientedX, head);
-      const mirrorDistance = this.circularDistance(segment.orientedX, mirrorHead);
-      const primaryTail = Math.max(0, 1 - distance / tailLength);
-      const secondaryTail = Math.max(0, 1 - mirrorDistance / (tailLength * 0.72));
-      const headCore =
-        this.gaussian(distance, headWidth) * (0.52 + this.pulseStrength * 0.42);
-      const mirroredCore =
-        this.gaussian(mirrorDistance, headWidth * 1.25) *
-        (0.18 + this.smoothBass * 0.18);
-      const bpmWave =
+      const mirrorX = 1 - Math.abs(segment.localX * 2 - 1);
+      const binPosition = mirrorX * (frequencyBins.length - 1);
+      const lowerBin = Math.floor(binPosition);
+      const upperBin = Math.min(frequencyBins.length - 1, lowerBin + 1);
+      const binMix = binPosition - lowerBin;
+      const lowerLevel = frequencyBins[lowerBin] ?? 0;
+      const upperLevel = frequencyBins[upperBin] ?? lowerLevel;
+      const frequencyLevel =
+        lowerLevel + (upperLevel - lowerLevel) * binMix;
+      const relativeLevel = this.clamp(frequencyLevel / maxFrequency, 0, 1);
+      const binCenterDistance = Math.abs(binPosition - Math.round(binPosition));
+      const barLine = Math.max(0, 1 - binCenterDistance / 0.36);
+      const wave =
         Math.sin(
-          (segment.localX * 2.2 + segment.phase * 0.9) * Math.PI * 2 -
+          (segment.phase * 1.7 + mirrorX * 2.4) * Math.PI * 2 -
             fullWavePhase,
         ) *
           0.5 +
         0.5;
-      const body =
-        Math.pow(primaryTail, 1.65) * (0.26 + lowDrive * 0.56) +
-        Math.pow(secondaryTail, 2.1) * (0.12 + this.smoothMid * 0.2) +
-        headCore +
-        mirroredCore +
-        bpmWave * this.smoothEnergy * 0.08;
-      const sparkleSeed = this.fract(
+      const shimmer =
         Math.sin(
-          i * 12.9898 +
-            segment.segmentIndex * 78.233 +
-            this.musicTexture * 24.17,
-        ) * 43758.5453,
-      );
-      const sparkleGate = 0.993 - sparkleAmount * 0.055;
-      const sparkle =
-        sparkleSeed > sparkleGate
-          ? Math.pow((sparkleSeed - sparkleGate) / (1 - sparkleGate), 2.2) *
-            (0.18 + sparkleAmount * 0.4)
-          : 0;
+          (segment.localX * 19 + segment.segmentIndex * 1.7) * Math.PI * 2 +
+            texturePhase,
+        ) *
+          0.5 +
+        0.5;
+      const centerKick =
+        this.gaussian(Math.abs(segment.localX - 0.5), 0.055) *
+        (this.smoothKick * 0.34 + this.beatFlash * 0.18);
+      const edgeTreble =
+        Math.max(
+          this.gaussian(segment.localX, 0.045),
+          this.gaussian(1 - segment.localX, 0.045),
+        ) *
+        this.smoothTreble *
+        0.22;
+      const body =
+        0.035 +
+        Math.pow(relativeLevel, 0.82) * (0.32 + frequencyLevel * 0.58) +
+        barLine * frequencyLevel * 0.2 +
+        wave * frequencyLevel * 0.11 +
+        shimmer * this.smoothTreble * relativeLevel * 0.08 +
+        centerKick +
+        edgeTreble +
+        this.dropFlash * relativeLevel * 0.06;
       const value = this.compressMusicValue(
-        (0.025 + body + sparkle + transientPunch * 0.045) *
-          brightnessMultiplier,
+        body * brightnessMultiplier * (0.78 + barLine * 0.22),
       );
 
       const hue =
-        (265 +
-          colorDrive * 72 +
-          lowDrive * -34 +
-          segment.phase * 28 +
-          segment.orientedX * 18 +
-          Math.sin(texturePhase + segment.phase * Math.PI * 2) * 12) %
+        (8 +
+          (binPosition / Math.max(1, frequencyBins.length - 1)) * 276 +
+          segment.segmentIndex * 2.5 +
+          wave * 8 +
+          this.musicTexture * 14) %
         360;
       const saturation = this.clamp(
-        0.86 - headCore * 0.18 - sparkle * 0.5 + this.smoothTreble * 0.08,
-        0.34,
+        0.82 + relativeLevel * 0.14 - barLine * 0.08,
+        0.48,
         1,
       );
       writeHsvToRgb(pixels, i * 3, hue, saturation, value);

@@ -21,6 +21,7 @@ type AudioServiceInternals = {
             ratioThreshold: number;
         },
     ): number;
+    calculateSpectrumBins(mags: number[], binHz: number): number[];
 };
 
 describe('AudioService normalization', () => {
@@ -152,5 +153,21 @@ describe('AudioService normalization', () => {
         expect(flash).toBeGreaterThan(steady * 2.5);
         expect(afterFlash).toBeGreaterThan(0.05);
         expect(afterFlash).toBeLessThan(flash);
+    });
+
+    it('extracts a thirty-bin adaptive spectrum for dense visualizers', () => {
+        const service = createService() as unknown as AudioServiceInternals;
+        const binHz = 44100 / 1024;
+        const mags = new Array(512).fill(1e-6);
+
+        mags[Math.round(90 / binHz)] = 1;
+        mags[Math.round(1100 / binHz)] = 0.7;
+        mags[Math.round(7600 / binHz)] = 0.9;
+
+        const bins = service.calculateSpectrumBins(mags, binHz);
+
+        expect(bins).toHaveLength(30);
+        expect(Math.max(...bins)).toBeGreaterThan(0.6);
+        expect(bins.filter((value) => value > 0.2).length).toBeGreaterThanOrEqual(3);
     });
 });
