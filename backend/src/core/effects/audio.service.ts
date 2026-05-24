@@ -121,6 +121,8 @@ export class AudioService implements OnModuleDestroy {
   private inputRmsSumSquares = 0;
   private inputRmsSamples = 0;
   private inputGain = 1;
+  private inputWindowRms = 0;
+  private inputWindowPeak = 0;
   private normalizedWindowRms = 0;
   private normalizedWindowPeak = 0;
   private lastDebugAt = 0;
@@ -212,13 +214,21 @@ export class AudioService implements OnModuleDestroy {
     }
 
     const gain = this.updateInputGain(windowStats.rms, windowStats.peak);
-    this.normalizedWindowRms = windowStats.rms * gain;
-    this.normalizedWindowPeak = windowStats.peak * gain;
+    const desiredGain = this.calculateDesiredInputGain(
+      windowStats.rms,
+      windowStats.peak,
+    );
+    const analysisGain = Math.min(gain, desiredGain * MAX_GAIN_OVERSHOOT);
+    this.inputGain = analysisGain;
+    this.inputWindowRms = windowStats.rms;
+    this.inputWindowPeak = windowStats.peak;
+    this.normalizedWindowRms = windowStats.rms * analysisGain;
+    this.normalizedWindowPeak = windowStats.peak * analysisGain;
 
     for (let i = 0; i < FFT_SIZE; i++) {
       const sourceIndex = (this.audioWriteIndex + i) % FFT_SIZE;
       const normalizedSample = this.softLimitSample(
-        this.audioMono[sourceIndex] * gain,
+        this.audioMono[sourceIndex] * analysisGain,
       );
       this.windowedAudio[i] = normalizedSample * this.window[i];
     }
@@ -723,17 +733,7 @@ export class AudioService implements OnModuleDestroy {
       return this.inputGain;
     }
 
-    const desiredRmsGain =
-      this.normalizeTargetRms / Math.max(windowRms, this.noiseFloorRms);
-    const desiredPeakGain =
-      Number.isFinite(windowPeak) && windowPeak > this.noiseFloorRms
-        ? this.normalizeTargetPeak / windowPeak
-        : this.normalizeMaxGain;
-    const desiredGain = this.clamp(
-      Math.min(desiredRmsGain, desiredPeakGain),
-      this.normalizeMinGain,
-      this.normalizeMaxGain,
-    );
+    const desiredGain = this.calculateDesiredInputGain(windowRms, windowPeak);
     if (desiredGain < this.inputGain) {
       const smoothedGain =
         this.inputGain + (desiredGain - this.inputGain) * GAIN_DECREASE_RATE;
@@ -743,6 +743,21 @@ export class AudioService implements OnModuleDestroy {
 
     this.inputGain += (desiredGain - this.inputGain) * GAIN_INCREASE_RATE;
     return this.inputGain;
+  }
+
+  private calculateDesiredInputGain(windowRms: number, windowPeak = windowRms) {
+    const desiredRmsGain =
+      this.normalizeTargetRms / Math.max(windowRms, this.noiseFloorRms);
+    const desiredPeakGain =
+      Number.isFinite(windowPeak) && windowPeak > this.noiseFloorRms
+        ? this.normalizeTargetPeak / windowPeak
+        : this.normalizeMaxGain;
+
+    return this.clamp(
+      Math.min(desiredRmsGain, desiredPeakGain),
+      this.normalizeMinGain,
+      this.normalizeMaxGain,
+    );
   }
 
   private softLimitSample(sample: number) {
@@ -895,6 +910,8 @@ export class AudioService implements OnModuleDestroy {
       [
         'Audio debug',
         `inRms=${debugInputRms.toFixed(4)}`,
+        `winRms=${this.inputWindowRms.toFixed(4)}`,
+        `winPeak=${this.inputWindowPeak.toFixed(4)}`,
         `normRms=${this.normalizedWindowRms.toFixed(4)}`,
         `normPeak=${this.normalizedWindowPeak.toFixed(4)}`,
         `gain=${this.inputGain.toFixed(2)}`,
@@ -930,6 +947,8 @@ export class AudioService implements OnModuleDestroy {
     this.inputEnvelopeFast = 0;
     this.inputEnvelopeSlow = 0;
     this.inputGain = this.smoothValue(1, this.inputGain, 0.08, 0.08);
+    this.inputWindowRms = 0;
+    this.inputWindowPeak = 0;
     this.normalizedWindowRms = 0;
     this.normalizedWindowPeak = 0;
   }
