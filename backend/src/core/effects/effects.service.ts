@@ -106,6 +106,12 @@ export class EffectsService {
     return x / (1 + Math.abs(x) * 1.15);
   }
 
+  private compressMusicValue(value: number): number {
+    if (!Number.isFinite(value) || value <= 0) return 0;
+
+    return this.clamp(1 - Math.exp(-value * 0.95), 0, 0.74);
+  }
+
   private gaussian(distance: number, width: number): number {
     const safeWidth = Math.max(0.0001, width);
     const t = distance / safeWidth;
@@ -235,8 +241,7 @@ export class EffectsService {
     hueBase = 0,
   ): Promise<Uint8Array> {
     const pixels = new Uint8Array(ledCount * 3);
-    const safeBrightness =
-      brightness <= 0 ? 0 : this.clamp(brightness ?? 0.7, 0.12, 1);
+    const safeBrightness = this.clampBrightness(brightness ?? 0.7, 0.12);
     if (safeBrightness === 0) return pixels;
 
     const spectrum = this.audioService.getAudioSpectrum();
@@ -348,6 +353,7 @@ export class EffectsService {
       0,
       1.15,
     );
+    const visualEnergy = Math.pow(this.clamp(this.smoothEnergy, 0, 1), 1.25);
 
     const flowDt = safeDt * this.SPEED_MUSIC;
     this.musicFlow +=
@@ -383,10 +389,10 @@ export class EffectsService {
       (this.bassFrontAge * (1.35 + this.smoothKick * 0.55)) % 1;
     const brightnessMultiplier =
       safeBrightness *
-      (0.78 +
-        this.smoothEnergy * 0.72 +
-        this.beatFlash * 0.22 +
-        this.dropFlash * 0.38);
+      (0.44 +
+        visualEnergy * 0.26 +
+        this.beatFlash * 0.05 +
+        this.dropFlash * 0.08);
 
     for (let i = 0; i < ledCount; i++) {
       const segment = this.getMusicSegmentPosition(i, ledCount);
@@ -500,13 +506,12 @@ export class EffectsService {
           sparkle * 1.35 +
           undertow +
           segmentChase +
-          transientPunch * 0.16 +
-          this.dropFlash * 0.2 +
-          this.beatFlash * 0.1) *
+          transientPunch * 0.1 +
+          this.dropFlash * 0.12 +
+          this.beatFlash * 0.06) *
         brightnessMultiplier;
 
-      value = this.clamp(value, 0, 1);
-      value = Number.isFinite(value) ? value : 0;
+      value = this.compressMusicValue(value);
 
       const hue =
         (sceneHueBase +
@@ -527,7 +532,7 @@ export class EffectsService {
           this.dropFlash * 0.38 -
           bassFront * 0.2 -
           pulseCore * 0.22,
-        0.06,
+        0.32,
         1,
       );
       writeHsvToRgb(pixels, i * 3, hue, saturation, value);
