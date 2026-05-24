@@ -932,14 +932,17 @@ export class AudioService implements OnModuleDestroy {
       SPECTRUM_AVERAGE_FALL,
     );
     const scale = Math.max(this.spectrumAverageMax * SPECTRUM_MAX_COEF, 1e-6);
-    const noiseGate = scale * 0.025;
+    const noiseGate = scale * 0.075;
 
     for (let i = 0; i < SPECTRUM_BIN_COUNT; i++) {
       const raw = rawBins[i] < noiseGate ? 0 : rawBins[i];
-      const held = Math.max(raw, this.spectrumBins[i] * scale - scale * SPECTRUM_HOLD_DECAY);
+      const held = Math.max(
+        raw,
+        this.spectrumBins[i] * scale - scale * SPECTRUM_HOLD_DECAY,
+      );
       const normalized = this.clamp(held / scale, 0, 1);
 
-      this.spectrumBins[i] = Math.pow(normalized, 0.72);
+      this.spectrumBins[i] = Math.pow(normalized, 0.92);
     }
 
     return Array.from(this.spectrumBins);

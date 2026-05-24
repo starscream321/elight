@@ -133,4 +133,28 @@ describe('EffectsService effects', () => {
         expect(maxChannel).toBeLessThan(180);
         expect(averageChannel).toBeLessThan(90);
     });
+
+    it('music does not flash the whole strip for a flat spectrum', async () => {
+        (audioService.getAudioSpectrum as jest.Mock).mockReturnValue({
+            kick: 0.8,
+            bass: 0.8,
+            mid: 0.8,
+            treble: 0.8,
+            energy: 0.8,
+            beat: true,
+            spectrum: new Array(30).fill(0.7),
+        });
+
+        const ledCount = 240;
+        const frame = await service.music(ledCount, 1000, 1, 180);
+        const levels = Array.from({ length: ledCount }, (_, led) =>
+            pixelLevel(frame, led),
+        );
+        const average =
+            levels.reduce((sum, level) => sum + level, 0) / levels.length;
+        const brightPixels = levels.filter((level) => level > 80).length;
+
+        expect(average).toBeLessThan(45);
+        expect(brightPixels / ledCount).toBeLessThan(0.12);
+    });
 });

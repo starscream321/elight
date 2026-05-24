@@ -355,12 +355,13 @@ export class EffectsService {
             this.smoothMid,
             this.smoothTreble,
           ];
-    const maxFrequency = Math.max(0.12, ...frequencyBins);
+    const sortedBins = [...frequencyBins].sort((a, b) => a - b);
+    const spectrumFloor =
+      sortedBins[Math.floor(sortedBins.length * 0.35)] ?? 0;
+    const spectrumCeiling = Math.max(0.12, ...frequencyBins);
+    const spectrumRange = Math.max(spectrumCeiling - spectrumFloor, 0.08);
     const brightnessMultiplier =
-      safeBrightness *
-      (0.56 +
-        this.clamp(this.smoothEnergy, 0, 1) * 0.42 +
-        this.beatFlash * 0.08);
+      safeBrightness * (0.62 + this.clamp(this.smoothEnergy, 0, 1) * 0.18);
 
     for (let i = 0; i < ledCount; i++) {
       const segment = this.getMusicSegmentPosition(i, ledCount);
@@ -373,7 +374,11 @@ export class EffectsService {
       const upperLevel = frequencyBins[upperBin] ?? lowerLevel;
       const frequencyLevel =
         lowerLevel + (upperLevel - lowerLevel) * binMix;
-      const relativeLevel = this.clamp(frequencyLevel / maxFrequency, 0, 1);
+      const relativeLevel = this.clamp(
+        (frequencyLevel - spectrumFloor) / spectrumRange,
+        0,
+        1,
+      );
       const binCenterDistance = Math.abs(binPosition - Math.round(binPosition));
       const barLine = Math.max(0, 1 - binCenterDistance / 0.36);
       const wave =
@@ -392,23 +397,23 @@ export class EffectsService {
         0.5;
       const centerKick =
         this.gaussian(Math.abs(segment.localX - 0.5), 0.055) *
-        (this.smoothKick * 0.34 + this.beatFlash * 0.18);
+        (this.smoothKick * 0.12 + this.beatFlash * 0.06);
       const edgeTreble =
         Math.max(
           this.gaussian(segment.localX, 0.045),
           this.gaussian(1 - segment.localX, 0.045),
         ) *
         this.smoothTreble *
-        0.22;
+        0.08;
       const body =
-        0.035 +
-        Math.pow(relativeLevel, 0.82) * (0.32 + frequencyLevel * 0.58) +
-        barLine * frequencyLevel * 0.2 +
-        wave * frequencyLevel * 0.11 +
+        0.006 +
+        Math.pow(relativeLevel, 1.08) * (0.22 + frequencyLevel * 0.78) +
+        barLine * relativeLevel * 0.22 +
+        wave * relativeLevel * 0.08 +
         shimmer * this.smoothTreble * relativeLevel * 0.08 +
         centerKick +
         edgeTreble +
-        this.dropFlash * relativeLevel * 0.06;
+        this.dropFlash * relativeLevel * 0.035;
       const value = this.compressMusicValue(
         body * brightnessMultiplier * (0.78 + barLine * 0.22),
       );
