@@ -157,4 +157,34 @@ describe('EffectsService effects', () => {
         expect(average).toBeLessThan(45);
         expect(brightPixels / ledCount).toBeLessThan(0.12);
     });
+
+    it('music suppresses overloaded low-contrast audio input', async () => {
+        (audioService.getAudioSpectrum as jest.Mock).mockReturnValue({
+            kick: 0.88,
+            bass: 0.88,
+            mid: 0.88,
+            treble: 0.88,
+            energy: 0.88,
+            beat: true,
+            safety: 0.05,
+            spectrum: new Array(30).fill(0.9),
+        });
+
+        const ledCount = 240;
+        let frame = new Uint8Array(ledCount * 3);
+
+        for (let frameIndex = 0; frameIndex < 8; frameIndex++) {
+            frame = await service.music(ledCount, 1000 + frameIndex * 16, 1, 180);
+        }
+
+        const levels = Array.from({ length: ledCount }, (_, led) =>
+            pixelLevel(frame, led),
+        );
+        const average =
+            levels.reduce((sum, level) => sum + level, 0) / levels.length;
+        const brightPixels = levels.filter((level) => level > 45).length;
+
+        expect(average).toBeLessThan(16);
+        expect(brightPixels / ledCount).toBeLessThan(0.04);
+    });
 });

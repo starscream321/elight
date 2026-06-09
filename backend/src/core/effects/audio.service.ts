@@ -105,6 +105,7 @@ export interface AudioFeatures {
   energy: number;
   beat: boolean;
   spectrum: number[];
+  safety?: number;
 }
 
 type AudioSourceKind = 'alsa' | 'pulse';
@@ -370,6 +371,7 @@ export class AudioService implements OnModuleDestroy {
       energy,
       beat,
       spectrum: frequencyBins,
+      safety: this.inputSafety,
     };
 
     this.logDebug(features, currentInputRms);
@@ -821,14 +823,14 @@ export class AudioService implements OnModuleDestroy {
       return 1;
     }
 
-    const peakSafety = 1 - this.smoothstep(0.82, 0.98, windowPeak);
+    const peakSafety = 1 - this.smoothstep(0.74, 0.96, windowPeak) * 0.96;
     const crest = windowPeak / Math.max(windowRms, 1e-6);
     const crestPenalty =
       windowRms > LOW_CREST_RMS_THRESHOLD
         ? this.smoothstep(LOW_CREST_START, LOW_CREST_FULL, crest)
         : 0;
 
-    return this.clamp(Math.min(peakSafety, 1 - crestPenalty * 0.78), 0.18, 1);
+    return this.clamp(Math.min(peakSafety, 1 - crestPenalty * 0.9), 0.04, 1);
   }
 
   private calculateSpectralSafety(mags: number[], binHz: number) {
@@ -863,7 +865,7 @@ export class AudioService implements OnModuleDestroy {
       flatness,
     );
 
-    return this.clamp(1 - dirtyAmount * 0.72, 0.28, 1);
+    return this.clamp(1 - dirtyAmount * 0.94, 0.06, 1);
   }
 
   private smoothstep(edge0: number, edge1: number, value: number) {
@@ -1278,6 +1280,7 @@ export class AudioService implements OnModuleDestroy {
       energy: 0,
       beat: false,
       spectrum: new Array(SPECTRUM_BIN_COUNT).fill(0),
+      safety: 1,
     };
   }
 }

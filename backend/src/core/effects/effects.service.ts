@@ -360,8 +360,27 @@ export class EffectsService {
       sortedBins[Math.floor(sortedBins.length * 0.35)] ?? 0;
     const spectrumCeiling = Math.max(0.12, ...frequencyBins);
     const spectrumRange = Math.max(spectrumCeiling - spectrumFloor, 0.08);
+    const spectrumMean =
+      frequencyBins.reduce((sum, value) => sum + value, 0) /
+      Math.max(1, frequencyBins.length);
+    const spectrumVariance =
+      frequencyBins.reduce(
+        (sum, value) => sum + Math.pow(value - spectrumMean, 2),
+        0,
+      ) / Math.max(1, frequencyBins.length);
+    const spectrumContrast =
+      Math.sqrt(spectrumVariance) / Math.max(0.03, spectrumMean);
+    const contrastGate = this.clamp(
+      (spectrumContrast - 0.04) / 0.22,
+      0.08,
+      1,
+    );
+    const signalSafety = this.clamp(spectrum.safety ?? 1, 0.04, 1);
+    const overloadGate = this.clamp(0.08 + signalSafety * 0.92, 0.08, 1);
     const brightnessMultiplier =
-      safeBrightness * (0.62 + this.clamp(this.smoothEnergy, 0, 1) * 0.18);
+      safeBrightness *
+      (0.62 + this.clamp(this.smoothEnergy, 0, 1) * 0.18) *
+      overloadGate;
 
     for (let i = 0; i < ledCount; i++) {
       const segment = this.getMusicSegmentPosition(i, ledCount);
@@ -378,7 +397,7 @@ export class EffectsService {
         (frequencyLevel - spectrumFloor) / spectrumRange,
         0,
         1,
-      );
+      ) * contrastGate;
       const binCenterDistance = Math.abs(binPosition - Math.round(binPosition));
       const barLine = Math.max(0, 1 - binCenterDistance / 0.36);
       const wave =
@@ -397,14 +416,16 @@ export class EffectsService {
         0.5;
       const centerKick =
         this.gaussian(Math.abs(segment.localX - 0.5), 0.055) *
-        (this.smoothKick * 0.12 + this.beatFlash * 0.06);
+        (this.smoothKick * 0.12 + this.beatFlash * 0.06) *
+        overloadGate;
       const edgeTreble =
         Math.max(
           this.gaussian(segment.localX, 0.045),
           this.gaussian(1 - segment.localX, 0.045),
         ) *
         this.smoothTreble *
-        0.08;
+        0.08 *
+        overloadGate;
       const body =
         0.006 +
         Math.pow(relativeLevel, 1.08) * (0.22 + frequencyLevel * 0.78) +

@@ -120,6 +120,7 @@ describe('AudioService normalization', () => {
         expect(service.calculateInputShapeSafety(0.05, 0.26)).toBeGreaterThan(0.9);
         expect(service.calculateInputShapeSafety(0.14, 0.19)).toBeLessThan(0.45);
         expect(service.calculateInputShapeSafety(0.08, 0.96)).toBeLessThan(0.35);
+        expect(service.calculateInputShapeSafety(0.5, 0.98)).toBeLessThan(0.12);
     });
 
     it('reduces safety for broadband noisy spectra', () => {
@@ -133,7 +134,7 @@ describe('AudioService normalization', () => {
         peaky[Math.round(850 / binHz)] = 0.35;
 
         expect(service.calculateSpectralSafety(peaky, binHz)).toBeGreaterThan(0.85);
-        expect(service.calculateSpectralSafety(noisy, binHz)).toBeLessThan(0.4);
+        expect(service.calculateSpectralSafety(noisy, binHz)).toBeLessThan(0.18);
     });
 
     it('keeps steady bands restrained and passes relative frequency flashes', () => {
