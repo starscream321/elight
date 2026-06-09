@@ -6,6 +6,14 @@ import {
   spawnSync,
 } from 'child_process';
 import { fft as FFT } from 'fft-js';
+import {
+  averageByteRange,
+  calculateVolumeRawFromFloatSamples,
+  createEmptyWledLikeAudioData,
+  detectPeak,
+  mapFrequencyBinsTo16Bands,
+  WledLikeAudioData,
+} from './wled-audio.utils';
 
 const SAMPLE_RATE = 44100;
 const FFT_SIZE = 1024;
@@ -54,6 +62,12 @@ const LOW_CREST_FULL = 1.45;
 const ENVELOPE_BEAT_THRESHOLD = 0.04;
 const ENVELOPE_BEAT_RATIO = 1.7;
 const ENVELOPE_BEAT_COOLDOWN_SAMPLES = Math.round(SAMPLE_RATE * 0.12);
+const DEFAULT_WLED_VOLUME_SMOOTHING = 0.8;
+const DEFAULT_WLED_PEAK_MULTIPLIER = 1.35;
+const DEFAULT_WLED_MIN_PEAK_VOLUME = 35;
+const DEFAULT_WLED_PEAK_COOLDOWN_FRAMES = 8;
+const WLED_FREQUENCY_SCALE_RISE = 0.18;
+const WLED_FREQUENCY_SCALE_FALL = 0.025;
 
 const BAND_SETTINGS = {
   kick: {
@@ -139,6 +153,10 @@ export class AudioService implements OnModuleDestroy {
   private readonly normalizeTargetPeak: number;
   private readonly normalizeMinGain: number;
   private readonly normalizeMaxGain: number;
+  private readonly wledVolumeSmoothing: number;
+  private readonly wledPeakMultiplier: number;
+  private readonly wledMinPeakVolume: number;
+  private readonly wledPeakCooldownFrames: number;
   private inputDebugSumSquares = 0;
   private inputDebugPeak = 0;
   private inputDebugSamples = 0;
@@ -202,6 +220,9 @@ export class AudioService implements OnModuleDestroy {
   private inputEnvelopeSlow = 0;
   private envelopeBeatCooldownSamples = 0;
   private pendingEnvelopeBeat = false;
+  private wledVolumeSmth = 0;
+  private wledPeakCooldownFramesLeft = 0;
+  private wledFrequencyScale = 12;
 
   constructor(private readonly config: ConfigService) {
     this.audioChannels = this.getAudioChannels();
@@ -238,6 +259,26 @@ export class AudioService implements OnModuleDestroy {
         'AUDIO_NORMALIZE_MAX_GAIN',
         DEFAULT_NORMALIZE_MAX_GAIN,
       ),
+    );
+    this.wledVolumeSmoothing = this.clamp(
+      this.getPositiveConfigNumber(
+        'AUDIO_WLED_VOLUME_SMOOTHING',
+        DEFAULT_WLED_VOLUME_SMOOTHING,
+      ),
+      0,
+      0.98,
+    );
+    this.wledPeakMultiplier = this.getPositiveConfigNumber(
+      'AUDIO_WLED_PEAK_MULTIPLIER',
+      DEFAULT_WLED_PEAK_MULTIPLIER,
+    );
+    this.wledMinPeakVolume = this.getPositiveConfigNumber(
+      'AUDIO_WLED_MIN_PEAK_VOLUME',
+      DEFAULT_WLED_MIN_PEAK_VOLUME,
+    );
+    this.wledPeakCooldownFrames = this.getPositiveConfigInt(
+      'AUDIO_WLED_PEAK_COOLDOWN_FRAMES',
+      DEFAULT_WLED_PEAK_COOLDOWN_FRAMES,
     );
   }
 
@@ -377,6 +418,77 @@ export class AudioService implements OnModuleDestroy {
     this.logDebug(features, currentInputRms);
 
     return features;
+  }
+
+  getWledLikeAudioData(): WledLikeAudioData {
+    this.start();
+
+    if (this.audioSamplesSeen < FFT_SIZE) {
+      return createEmptyWledLikeAudioData(this.wledVolumeSmth);
+    }
+
+    const windowStats = this.calculateCurrentWindowStats();
+    if (windowStats.rms < this.noiseFloorRms) {
+      this.wledVolumeSmth *= this.wledVolumeSmoothing;
+      this.wledPeakCooldownFramesLeft = Math.max(
+        0,
+        this.wledPeakCooldownFramesLeft - 1,
+      );
+      this.relaxWledFrequencyScale();
+      return createEmptyWledLikeAudioData(this.wledVolumeSmth);
+    }
+
+    const gain = this.updateInputGain(windowStats.rms, windowStats.peak);
+    const desiredGain = this.calculateDesiredInputGain(
+      windowStats.rms,
+      windowStats.peak,
+    );
+    const analysisGain = Math.min(gain, desiredGain * MAX_GAIN_OVERSHOOT);
+    const currentWindow = new Float32Array(FFT_SIZE);
+
+    for (let i = 0; i < FFT_SIZE; i++) {
+      const sourceIndex = (this.audioWriteIndex + i) % FFT_SIZE;
+      const normalizedSample = this.softLimitSample(
+        this.audioMono[sourceIndex] * analysisGain,
+      );
+
+      currentWindow[i] = normalizedSample;
+      this.windowedAudio[i] = normalizedSample * this.window[i];
+    }
+
+    const volumeRaw = calculateVolumeRawFromFloatSamples(currentWindow);
+    const peak = detectPeak(
+      volumeRaw,
+      this.wledVolumeSmth,
+      { cooldownFrames: this.wledPeakCooldownFramesLeft },
+      {
+        peakMultiplier: this.wledPeakMultiplier,
+        minPeakVolume: this.wledMinPeakVolume,
+        cooldownFrames: this.wledPeakCooldownFrames,
+      },
+    );
+
+    this.wledPeakCooldownFramesLeft = peak.cooldownFrames;
+    this.wledVolumeSmth =
+      this.wledVolumeSmth * this.wledVolumeSmoothing +
+      volumeRaw * (1 - this.wledVolumeSmoothing);
+
+    const spectrum = FFT(this.windowedAudio);
+    const mags = spectrum
+      .slice(0, FFT_SIZE / 2)
+      .map(([re, im]: [number, number]) => Math.hypot(re, im));
+    const frequencyBytes = this.createWledFrequencyBytes(mags);
+    const fftResult = mapFrequencyBinsTo16Bands(frequencyBytes, SAMPLE_RATE);
+
+    return {
+      volumeRaw,
+      volumeSmth: this.clamp(this.wledVolumeSmth, 0, 255),
+      fftResult,
+      samplePeak: peak.samplePeak,
+      bass: averageByteRange(fftResult, 0, 5),
+      mids: averageByteRange(fftResult, 5, 11),
+      highs: averageByteRange(fftResult, 11, 16),
+    };
   }
 
   private start() {
@@ -950,6 +1062,46 @@ export class AudioService implements OnModuleDestroy {
     return Array.from(this.spectrumBins);
   }
 
+  private createWledFrequencyBytes(mags: number[]) {
+    const out = new Uint8Array(mags.length);
+    const frameMax = mags.reduce(
+      (max, value) => (Number.isFinite(value) ? Math.max(max, value) : max),
+      0,
+    );
+
+    if (frameMax <= 1e-9) {
+      this.relaxWledFrequencyScale();
+      return out;
+    }
+
+    this.wledFrequencyScale = this.smoothValue(
+      frameMax,
+      this.wledFrequencyScale,
+      WLED_FREQUENCY_SCALE_RISE,
+      WLED_FREQUENCY_SCALE_FALL,
+    );
+
+    const scale = Math.max(this.wledFrequencyScale, 1e-6);
+    const logDenominator = Math.log1p(6);
+
+    for (let i = 0; i < mags.length; i++) {
+      const value = Number.isFinite(mags[i]) ? mags[i] : 0;
+      const compressed = Math.log1p((value / scale) * 6) / logDenominator;
+      out[i] = Math.round(this.clamp(compressed, 0, 1) * 255);
+    }
+
+    return out;
+  }
+
+  private relaxWledFrequencyScale() {
+    this.wledFrequencyScale = this.smoothValue(
+      12,
+      this.wledFrequencyScale,
+      0.04,
+      0.04,
+    );
+  }
+
   private spectrumBandPeak(
     mags: number[],
     binHz: number,
@@ -1170,6 +1322,9 @@ export class AudioService implements OnModuleDestroy {
     this.normalizedWindowRms = 0;
     this.normalizedWindowPeak = 0;
     this.spectralFlatness = 0;
+    this.wledVolumeSmth *= this.wledVolumeSmoothing;
+    this.wledPeakCooldownFramesLeft = 0;
+    this.relaxWledFrequencyScale();
   }
 
   private relaxBandRanges() {

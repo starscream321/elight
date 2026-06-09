@@ -1,6 +1,11 @@
 import { ConfigService } from '@nestjs/config';
 
 import { AudioService } from './audio.service';
+import {
+    calculateVolumeRaw,
+    detectPeak,
+    mapFrequencyBinsTo16Bands,
+} from './wled-audio.utils';
 
 type AudioServiceInternals = {
     updateInputGain(windowRms: number, windowPeak?: number): number;
@@ -170,5 +175,54 @@ describe('AudioService normalization', () => {
         expect(bins).toHaveLength(30);
         expect(Math.max(...bins)).toBeGreaterThan(0.6);
         expect(bins.filter((value) => value > 0.2).length).toBeGreaterThanOrEqual(3);
+    });
+
+    it('maps frequency data into exactly sixteen WLED-like bands', () => {
+        const frequencyData = new Uint8Array(512);
+        frequencyData[2] = 220;
+        frequencyData[40] = 180;
+        frequencyData[180] = 150;
+
+        const bands = mapFrequencyBinsTo16Bands(frequencyData, 44100);
+
+        expect(bands).toHaveLength(16);
+        expect(Math.max(...bands)).toBeGreaterThan(0);
+        expect(bands.every((value) => value >= 0 && value <= 255)).toBe(true);
+    });
+
+    it('calculates near-zero raw volume for centered byte samples', () => {
+        const silence = new Uint8Array(1024).fill(128);
+
+        expect(calculateVolumeRaw(silence)).toBeLessThanOrEqual(1);
+    });
+
+    it('increases raw volume for larger byte sample deviations', () => {
+        const quiet = Uint8Array.from({ length: 1024 }, (_, index) =>
+            index % 2 === 0 ? 124 : 132,
+        );
+        const loud = Uint8Array.from({ length: 1024 }, (_, index) =>
+            index % 2 === 0 ? 40 : 216,
+        );
+
+        expect(calculateVolumeRaw(loud)).toBeGreaterThan(calculateVolumeRaw(quiet));
+    });
+
+    it('detects peaks on sharp volume jumps and respects cooldown', () => {
+        const first = detectPeak(
+            120,
+            50,
+            { cooldownFrames: 0 },
+            { peakMultiplier: 1.35, minPeakVolume: 35, cooldownFrames: 4 },
+        );
+        const second = detectPeak(
+            130,
+            55,
+            { cooldownFrames: first.cooldownFrames },
+            { peakMultiplier: 1.35, minPeakVolume: 35, cooldownFrames: 4 },
+        );
+
+        expect(first.samplePeak).toBe(true);
+        expect(second.samplePeak).toBe(false);
+        expect(second.cooldownFrames).toBe(3);
     });
 });

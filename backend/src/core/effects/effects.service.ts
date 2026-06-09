@@ -9,6 +9,11 @@ import { Repository } from 'typeorm';
 import { hsvToRgb, writeHsvToRgb } from '../utils/color.utils';
 import { Effect } from './effects.entity';
 import { AudioService } from './audio.service';
+import {
+  EffectOptions,
+  LedPixel,
+  renderWledMusicEffect,
+} from './wled-music.effect';
 
 type EffectFunction = (
   ledCount: number,
@@ -36,45 +41,14 @@ export class EffectsService {
   private readonly SPEED_RAINBOW = 0.25;
   private readonly SPEED_COMET = 0.45;
   private readonly SPEED_AURORA = 0.4;
-  private readonly SPEED_MUSIC = 0.35;
   private readonly SPEED_SMOOTH_FADE = 1.0;
-  private readonly MUSIC_SEGMENT_COUNT = 8;
+  private readonly MUSIC_PIXEL_FADE = 0.82;
+  private readonly MUSIC_PEAK_FLASH_DECAY = 0.78;
 
-  private beatFlash = 0;
-  private previousKick = 0;
-
-  private lastMusicTimeSec: number | null = null;
-
-  private musicFlow = 0;
-  private musicTexture = 0;
-  private pulseAge = 10;
-  private pulseStrength = 0;
-  private bassFrontAge = 10;
-  private bassFrontStrength = 0;
-  private dropFlash = 0;
-
-  private smoothKick = 0;
-  private smoothBass = 0;
-  private smoothMid = 0;
-  private smoothTreble = 0;
-  private smoothEnergy = 0;
+  private previousMusicPixels: LedPixel[] = [];
 
   public resetState(): void {
-    this.beatFlash = 0;
-    this.previousKick = 0;
-    this.lastMusicTimeSec = null;
-    this.musicFlow = 0;
-    this.musicTexture = 0;
-    this.pulseAge = 10;
-    this.pulseStrength = 0;
-    this.bassFrontAge = 10;
-    this.bassFrontStrength = 0;
-    this.dropFlash = 0;
-    this.smoothKick = 0;
-    this.smoothBass = 0;
-    this.smoothMid = 0;
-    this.smoothTreble = 0;
-    this.smoothEnergy = 0;
+    this.previousMusicPixels = [];
   }
 
   private clampBrightness(
@@ -100,70 +74,6 @@ export class EffectsService {
 
   private clamp(value: number, min: number, max: number) {
     return Math.max(min, Math.min(max, value));
-  }
-
-  private softClip(x: number): number {
-    return x / (1 + Math.abs(x) * 1.15);
-  }
-
-  private compressMusicValue(value: number): number {
-    if (!Number.isFinite(value) || value <= 0) return 0;
-
-    return this.clamp(value / (1 + value * 1.55), 0, 0.62);
-  }
-
-  private gaussian(distance: number, width: number): number {
-    const safeWidth = Math.max(0.0001, width);
-    const t = distance / safeWidth;
-    return Math.exp(-0.5 * t * t);
-  }
-
-  private fract(value: number): number {
-    return value - Math.floor(value);
-  }
-
-  private circularDistance(a: number, b: number, period = 1): number {
-    const distance = Math.abs(a - b) % period;
-    return Math.min(distance, period - distance);
-  }
-
-  private getMusicSegmentPosition(index: number, ledCount: number) {
-    const safeLedCount = Math.max(1, ledCount);
-    const segmentCount = Math.min(this.MUSIC_SEGMENT_COUNT, safeLedCount);
-    const segmentIndex = Math.min(
-      segmentCount - 1,
-      Math.floor((index * segmentCount) / safeLedCount),
-    );
-    const segmentStart = Math.floor(
-      (segmentIndex * safeLedCount) / segmentCount,
-    );
-    const segmentEnd = Math.floor(
-      ((segmentIndex + 1) * safeLedCount) / segmentCount,
-    );
-    const segmentSize = Math.max(1, segmentEnd - segmentStart);
-    const localIndex = this.clamp(index - segmentStart, 0, segmentSize - 1);
-    const localX = segmentSize <= 1 ? 0.5 : localIndex / (segmentSize - 1);
-    const reversed = segmentIndex % 2 === 1;
-
-    return {
-      segmentIndex,
-      localX,
-      orientedX: reversed ? 1 - localX : localX,
-      centerDistance: Math.abs(localX - 0.5),
-      phase: segmentIndex / segmentCount,
-    };
-  }
-
-  private smoothAR(
-    current: number,
-    target: number,
-    attackPerSec: number,
-    releasePerSec: number,
-    dt: number,
-  ) {
-    const rate = target > current ? attackPerSec : releasePerSec;
-    const k = 1 - Math.exp(-rate * dt);
-    return current + (target - current) * k;
   }
 
   async staticColor(
@@ -241,217 +151,37 @@ export class EffectsService {
     hueBase = 0,
   ): Promise<Uint8Array> {
     const pixels = new Uint8Array(ledCount * 3);
-    const safeBrightness = this.clampBrightness(brightness ?? 0.7, 0.12);
-    if (safeBrightness === 0) return pixels;
-
-    const spectrum = this.audioService.getAudioSpectrum();
-
-    const nowSec = this.getTimeBase(timeInput);
-    const dt =
-      this.lastMusicTimeSec === null ? 1 / 60 : nowSec - this.lastMusicTimeSec;
-    this.lastMusicTimeSec = nowSec;
-
-    const safeDt = this.clamp(dt, 0, 0.05);
-
-    this.smoothKick = this.smoothAR(
-      this.smoothKick,
-      spectrum.kick,
-      22,
-      10,
-      safeDt,
-    );
-    this.smoothBass = this.smoothAR(
-      this.smoothBass,
-      spectrum.bass,
-      18,
-      9,
-      safeDt,
-    );
-    this.smoothMid = this.smoothAR(this.smoothMid, spectrum.mid, 10, 5, safeDt);
-    this.smoothTreble = this.smoothAR(
-      this.smoothTreble,
-      spectrum.treble,
-      8,
-      4,
-      safeDt,
-    );
-    this.smoothEnergy = this.smoothAR(
-      this.smoothEnergy,
-      spectrum.energy,
-      8,
-      4,
-      safeDt,
-    );
-
-    const kickDelta = Math.max(0, this.smoothKick - this.previousKick);
-    this.previousKick = this.smoothKick;
-
-    const transientPunch = Math.pow(kickDelta, 0.78) * 1.25;
-
-    const bassImpact = this.clamp(
-      this.smoothKick * 0.62 + this.smoothBass * 0.32 + transientPunch * 0.28,
-      0,
-      1.5,
-    );
-    const bassHit =
-      this.pulseAge > 0.11 && (spectrum.beat || transientPunch > 0.32);
-    const dropHit =
-      bassHit &&
-      this.smoothEnergy > 0.55 &&
-      this.smoothBass > 0.38 &&
-      this.smoothMid > 0.28;
-
-    if (bassHit) {
-      this.beatFlash = 1;
-      this.pulseAge = 0;
-      this.pulseStrength = this.clamp(
-        0.38 +
-          this.smoothKick * 0.34 +
-          this.smoothBass * 0.14 +
-          transientPunch * 0.12,
-        0,
-        1,
-      );
-      this.bassFrontAge = 0;
-      this.bassFrontStrength = this.clamp(0.32 + bassImpact * 0.58, 0, 1.15);
+    const safeBrightness = this.clampBrightness(brightness ?? 0.7);
+    if (safeBrightness === 0) {
+      this.previousMusicPixels = [];
+      return pixels;
     }
 
-    if (dropHit) {
-      this.dropFlash = 1;
-      this.pulseStrength = Math.min(1.12, this.pulseStrength + 0.16);
-      this.bassFrontStrength = Math.min(1.25, this.bassFrontStrength + 0.22);
-    }
-
-    this.beatFlash = this.smoothAR(this.beatFlash, 0, 18, 11, safeDt);
-    this.pulseStrength = this.smoothAR(this.pulseStrength, 0, 12, 4.8, safeDt);
-    this.pulseAge += safeDt;
-    this.bassFrontStrength = this.smoothAR(
-      this.bassFrontStrength,
-      0,
-      18,
-      5.4,
-      safeDt,
-    );
-    this.bassFrontAge += safeDt;
-    this.dropFlash = this.smoothAR(this.dropFlash, 0, 24, 6.2, safeDt);
-
-    const flowDt = safeDt * this.SPEED_MUSIC;
-    this.musicFlow += flowDt * (0.18 + this.smoothEnergy * 0.36);
-    this.musicTexture +=
-      flowDt * (0.28 + this.smoothTreble * 0.72 + this.beatFlash * 0.28);
-
-    const fullWavePhase = this.musicFlow * Math.PI * 2;
-    const texturePhase = this.musicTexture * Math.PI * 2;
+    void timeInput;
     void hueBase;
 
-    const frequencyBins =
-      spectrum.spectrum?.length > 0
-        ? spectrum.spectrum
-        : [
-            this.smoothKick,
-            this.smoothBass,
-            this.smoothBass,
-            this.smoothMid,
-            this.smoothMid,
-            this.smoothTreble,
-          ];
-    const sortedBins = [...frequencyBins].sort((a, b) => a - b);
-    const spectrumFloor =
-      sortedBins[Math.floor(sortedBins.length * 0.35)] ?? 0;
-    const spectrumCeiling = Math.max(0.12, ...frequencyBins);
-    const spectrumRange = Math.max(spectrumCeiling - spectrumFloor, 0.08);
-    const spectrumMean =
-      frequencyBins.reduce((sum, value) => sum + value, 0) /
-      Math.max(1, frequencyBins.length);
-    const spectrumVariance =
-      frequencyBins.reduce(
-        (sum, value) => sum + Math.pow(value - spectrumMean, 2),
-        0,
-      ) / Math.max(1, frequencyBins.length);
-    const spectrumContrast =
-      Math.sqrt(spectrumVariance) / Math.max(0.03, spectrumMean);
-    const contrastGate = this.clamp(
-      (spectrumContrast - 0.04) / 0.22,
-      0.08,
-      1,
+    const audio = this.audioService.getWledLikeAudioData();
+    const options: EffectOptions = {
+      ledCount,
+      smoothing: this.MUSIC_PIXEL_FADE,
+      peakMultiplier: 1.35,
+      minPeakVolume: 35,
+      peakFlashDecay: this.MUSIC_PEAK_FLASH_DECAY,
+    };
+
+    this.previousMusicPixels = renderWledMusicEffect(
+      audio,
+      this.previousMusicPixels,
+      options,
     );
-    const signalSafety = this.clamp(spectrum.safety ?? 1, 0.04, 1);
-    const overloadGate = this.clamp(0.08 + signalSafety * 0.92, 0.08, 1);
-    const brightnessMultiplier =
-      safeBrightness *
-      (0.62 + this.clamp(this.smoothEnergy, 0, 1) * 0.18) *
-      overloadGate;
 
-    for (let i = 0; i < ledCount; i++) {
-      const segment = this.getMusicSegmentPosition(i, ledCount);
-      const mirrorX = 1 - Math.abs(segment.localX * 2 - 1);
-      const binPosition = mirrorX * (frequencyBins.length - 1);
-      const lowerBin = Math.floor(binPosition);
-      const upperBin = Math.min(frequencyBins.length - 1, lowerBin + 1);
-      const binMix = binPosition - lowerBin;
-      const lowerLevel = frequencyBins[lowerBin] ?? 0;
-      const upperLevel = frequencyBins[upperBin] ?? lowerLevel;
-      const frequencyLevel =
-        lowerLevel + (upperLevel - lowerLevel) * binMix;
-      const relativeLevel = this.clamp(
-        (frequencyLevel - spectrumFloor) / spectrumRange,
-        0,
-        1,
-      ) * contrastGate;
-      const binCenterDistance = Math.abs(binPosition - Math.round(binPosition));
-      const barLine = Math.max(0, 1 - binCenterDistance / 0.36);
-      const wave =
-        Math.sin(
-          (segment.phase * 1.7 + mirrorX * 2.4) * Math.PI * 2 -
-            fullWavePhase,
-        ) *
-          0.5 +
-        0.5;
-      const shimmer =
-        Math.sin(
-          (segment.localX * 19 + segment.segmentIndex * 1.7) * Math.PI * 2 +
-            texturePhase,
-        ) *
-          0.5 +
-        0.5;
-      const centerKick =
-        this.gaussian(Math.abs(segment.localX - 0.5), 0.055) *
-        (this.smoothKick * 0.12 + this.beatFlash * 0.06) *
-        overloadGate;
-      const edgeTreble =
-        Math.max(
-          this.gaussian(segment.localX, 0.045),
-          this.gaussian(1 - segment.localX, 0.045),
-        ) *
-        this.smoothTreble *
-        0.08 *
-        overloadGate;
-      const body =
-        0.006 +
-        Math.pow(relativeLevel, 1.08) * (0.22 + frequencyLevel * 0.78) +
-        barLine * relativeLevel * 0.22 +
-        wave * relativeLevel * 0.08 +
-        shimmer * this.smoothTreble * relativeLevel * 0.08 +
-        centerKick +
-        edgeTreble +
-        this.dropFlash * relativeLevel * 0.035;
-      const value = this.compressMusicValue(
-        body * brightnessMultiplier * (0.78 + barLine * 0.22),
-      );
+    for (let i = 0; i < this.previousMusicPixels.length; i++) {
+      const pixel = this.previousMusicPixels[i];
+      const offset = i * 3;
 
-      const hue =
-        (8 +
-          (binPosition / Math.max(1, frequencyBins.length - 1)) * 276 +
-          segment.segmentIndex * 2.5 +
-          wave * 8 +
-          this.musicTexture * 14) %
-        360;
-      const saturation = this.clamp(
-        0.82 + relativeLevel * 0.14 - barLine * 0.08,
-        0.48,
-        1,
-      );
-      writeHsvToRgb(pixels, i * 3, hue, saturation, value);
+      pixels[offset] = Math.round(pixel.g * safeBrightness);
+      pixels[offset + 1] = Math.round(pixel.r * safeBrightness);
+      pixels[offset + 2] = Math.round(pixel.b * safeBrightness);
     }
 
     return pixels;

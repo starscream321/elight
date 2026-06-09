@@ -1,25 +1,27 @@
 import { EffectsService } from './effects.service';
 import { AudioService } from './audio.service';
+import { WledLikeAudioData } from './wled-audio.utils';
+import { renderWledMusicEffect } from './wled-music.effect';
 
 describe('EffectsService effects', () => {
     let service: EffectsService;
-    const defaultSpectrum = {
-        kick: 0.7,
-        bass: 0.5,
-        mid: 0.4,
-        treble: 0.3,
-        energy: 0.6,
-        beat: true,
-        spectrum: Array.from({ length: 30 }, (_, index) =>
-            index < 8 ? 0.7 : index < 18 ? 0.45 : 0.25,
+    const defaultAudio: WledLikeAudioData = {
+        volumeRaw: 150,
+        volumeSmth: 165,
+        fftResult: Uint8Array.from({ length: 16 }, (_, index) =>
+            index < 5 ? 220 : index < 11 ? 170 : 130,
         ),
+        samplePeak: true,
+        bass: 220,
+        mids: 170,
+        highs: 130,
     };
     const audioService = {
-        getAudioSpectrum: jest.fn(() => defaultSpectrum),
+        getWledLikeAudioData: jest.fn(() => defaultAudio),
     } as unknown as AudioService;
 
     beforeEach(() => {
-        (audioService.getAudioSpectrum as jest.Mock).mockReturnValue(defaultSpectrum);
+        (audioService.getWledLikeAudioData as jest.Mock).mockReturnValue(defaultAudio);
         service = new EffectsService({} as never, audioService);
         service.resetState();
     });
@@ -63,128 +65,117 @@ describe('EffectsService effects', () => {
         }
     });
 
-    const segmentLevels = (frame: Uint8Array, ledCount: number, segmentIndex: number) => {
-        const segmentSize = ledCount / 8;
-        const start = Math.floor(segmentIndex * segmentSize);
-        const end = Math.floor((segmentIndex + 1) * segmentSize);
-        const levels: number[] = [];
+    const averageChannel = (
+        frame: Uint8Array,
+        ledCount: number,
+        startRatio: number,
+        endRatio: number,
+        channelOffset: number,
+    ) => {
+        const start = Math.floor(ledCount * startRatio);
+        const end = Math.max(start + 1, Math.floor(ledCount * endRatio));
+        let sum = 0;
 
         for (let led = start; led < end; led++) {
-            levels.push(pixelLevel(frame, led));
+            sum += frame[led * 3 + channelOffset];
         }
 
-        return levels;
+        return sum / (end - start);
     };
 
-    it('music maps many frequency bins symmetrically inside each segment', async () => {
-        const spectrumBins = new Array(30).fill(0.05);
-        spectrumBins[0] = 1;
-        spectrumBins[14] = 0.62;
-        spectrumBins[29] = 0.9;
-        (audioService.getAudioSpectrum as jest.Mock).mockReturnValue({
-            kick: 0.8,
-            bass: 0.55,
-            mid: 0.4,
-            treble: 0.7,
-            energy: 0.75,
-            beat: false,
-            spectrum: spectrumBins,
-        });
+    it('music maps bass, mids and highs to the expected strip zones', async () => {
+        (audioService.getWledLikeAudioData as jest.Mock).mockReturnValue({
+            volumeRaw: 170,
+            volumeSmth: 190,
+            fftResult: Uint8Array.from({ length: 16 }, (_, index) =>
+                index < 5 ? 240 : index < 11 ? 60 : 45,
+            ),
+            samplePeak: false,
+            bass: 245,
+            mids: 60,
+            highs: 45,
+        } satisfies WledLikeAudioData);
 
-        const ledCount = 240;
-        const frame = await service.music(ledCount, 1000, 0.8, 0);
-        const levels = segmentLevels(frame, ledCount, 0);
-        const center = levels[Math.floor(levels.length / 2)];
-        const leftEdge = levels[0];
-        const rightEdge = levels[levels.length - 1];
-        const quarter = levels[Math.floor(levels.length * 0.25)];
-        const quietBin = levels[Math.floor(levels.length * 0.38)];
+        const ledCount = 120;
+        const frame = await service.music(ledCount, 1000, 1, 0);
 
-        expect(center).toBeGreaterThan(quietBin * 1.5);
-        expect(leftEdge).toBeGreaterThan(quietBin * 1.4);
-        expect(rightEdge).toBeGreaterThan(quietBin * 1.4);
-        expect(quarter).toBeGreaterThan(quietBin);
+        const bassBlue = averageChannel(frame, ledCount, 0, 0.3, 2);
+        const midsGreen = averageChannel(frame, ledCount, 0.3, 0.7, 0);
+        const highsRed = averageChannel(frame, ledCount, 0.7, 1, 1);
+
+        expect(bassBlue).toBeGreaterThan(midsGreen);
+        expect(bassBlue).toBeGreaterThan(highsRed);
     });
 
-    it('music compresses sustained high input instead of clipping the frame', async () => {
-        (audioService.getAudioSpectrum as jest.Mock).mockReturnValue({
-            kick: 0.95,
-            bass: 0.95,
-            mid: 0.95,
-            treble: 0.95,
-            energy: 0.95,
-            beat: true,
-            spectrum: new Array(30).fill(0.95),
-        });
+    it('music adds a white flash across the whole strip on sample peaks', async () => {
+        const ledCount = 90;
+        const frame = await service.music(ledCount, 1000, 1, 0);
 
-        const ledCount = 128;
-        let frame = new Uint8Array(ledCount * 3);
-
-        for (let frameIndex = 0; frameIndex < 24; frameIndex++) {
-            frame = await service.music(ledCount, 1000 + frameIndex * 16, 1, 180);
-        }
-
-        const clippedChannels = frame.filter((value) => value >= 250).length;
-        const maxChannel = frame.reduce((max, value) => Math.max(max, value), 0);
-        const averageChannel =
-            frame.reduce((sum, value) => sum + value, 0) / frame.length;
-
-        expect(clippedChannels / frame.length).toBeLessThan(0.02);
-        expect(maxChannel).toBeLessThan(180);
-        expect(averageChannel).toBeLessThan(90);
-    });
-
-    it('music does not flash the whole strip for a flat spectrum', async () => {
-        (audioService.getAudioSpectrum as jest.Mock).mockReturnValue({
-            kick: 0.8,
-            bass: 0.8,
-            mid: 0.8,
-            treble: 0.8,
-            energy: 0.8,
-            beat: true,
-            spectrum: new Array(30).fill(0.7),
-        });
-
-        const ledCount = 240;
-        const frame = await service.music(ledCount, 1000, 1, 180);
-        const levels = Array.from({ length: ledCount }, (_, led) =>
-            pixelLevel(frame, led),
+        const dimmestChannel = frame.reduce(
+            (min, value) => Math.min(min, value),
+            255,
         );
-        const average =
-            levels.reduce((sum, level) => sum + level, 0) / levels.length;
-        const brightPixels = levels.filter((level) => level > 80).length;
 
-        expect(average).toBeLessThan(45);
-        expect(brightPixels / ledCount).toBeLessThan(0.12);
+        expect(dimmestChannel).toBeGreaterThan(130);
     });
 
-    it('music suppresses overloaded low-contrast audio input', async () => {
-        (audioService.getAudioSpectrum as jest.Mock).mockReturnValue({
-            kick: 0.88,
-            bass: 0.88,
-            mid: 0.88,
-            treble: 0.88,
-            energy: 0.88,
-            beat: true,
-            safety: 0.05,
-            spectrum: new Array(30).fill(0.9),
+    it('music fades previous pixels instead of switching off instantly', async () => {
+        (audioService.getWledLikeAudioData as jest.Mock)
+            .mockReturnValueOnce({
+                volumeRaw: 180,
+                volumeSmth: 200,
+                fftResult: new Uint8Array(16).fill(220),
+                samplePeak: false,
+                bass: 240,
+                mids: 20,
+                highs: 20,
+            } satisfies WledLikeAudioData)
+            .mockReturnValueOnce({
+                volumeRaw: 0,
+                volumeSmth: 0,
+                fftResult: new Uint8Array(16),
+                samplePeak: false,
+                bass: 0,
+                mids: 0,
+                highs: 0,
+            } satisfies WledLikeAudioData);
+
+        const ledCount = 60;
+        const firstFrame = await service.music(ledCount, 1000, 1, 0);
+        const secondFrame = await service.music(ledCount, 1016, 1, 0);
+        const firstLevel = pixelLevel(firstFrame, 2);
+        const secondLevel = pixelLevel(secondFrame, 2);
+
+        expect(secondLevel).toBeGreaterThan(0);
+        expect(secondLevel).toBeLessThan(firstLevel);
+    });
+
+    it('music keeps every RGB channel in byte range', async () => {
+        const frame = await service.music(128, 1000, 1, 0);
+
+        expect(frame.every((value) => value >= 0 && value <= 255)).toBe(true);
+    });
+
+    it('renderWledMusicEffect returns ledCount pixels with RGB byte values', () => {
+        const pixels = renderWledMusicEffect(defaultAudio, [], {
+            ledCount: 32,
+            smoothing: 0.82,
+            peakMultiplier: 1.35,
+            minPeakVolume: 35,
+            peakFlashDecay: 0.78,
         });
 
-        const ledCount = 240;
-        let frame = new Uint8Array(ledCount * 3);
-
-        for (let frameIndex = 0; frameIndex < 8; frameIndex++) {
-            frame = await service.music(ledCount, 1000 + frameIndex * 16, 1, 180);
-        }
-
-        const levels = Array.from({ length: ledCount }, (_, led) =>
-            pixelLevel(frame, led),
-        );
-        const average =
-            levels.reduce((sum, level) => sum + level, 0) / levels.length;
-        const brightPixels = levels.filter((level) => level > 45).length;
-
-        expect(average).toBeLessThan(16);
-        expect(brightPixels / ledCount).toBeLessThan(0.04);
+        expect(pixels).toHaveLength(32);
+        expect(
+            pixels.every(
+                (pixel) =>
+                    pixel.r >= 0 &&
+                    pixel.r <= 255 &&
+                    pixel.g >= 0 &&
+                    pixel.g <= 255 &&
+                    pixel.b >= 0 &&
+                    pixel.b <= 255,
+            ),
+        ).toBe(true);
     });
 });
