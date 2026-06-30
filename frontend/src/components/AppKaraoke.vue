@@ -7,67 +7,91 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  title: '',
+  title: 'Видео-инструкция',
   description: '',
 });
 </script>
 
 <template>
-  <div class="container">
-    <div class="img_container">
-      <img class="img" :src="props.image" alt="image" />
-      <img class="qr" :src="props.qr" alt="qr" />
+  <section class="instruction-screen">
+    <div class="media">
+      <img class="media__image" :src="props.image" alt="" />
+      <img class="media__qr" :src="props.qr" alt="QR-код видео-инструкции" />
     </div>
-    <div class="text_container">
-      <p class="title">{{ props.title }}</p>
-      <p class="description">{{ props.description }}</p>
+    <div class="copy">
+      <h1 class="copy__title">{{ props.title }}</h1>
+      <p class="copy__description">{{ props.description }}</p>
     </div>
-  </div>
+  </section>
 </template>
 
 <style scoped>
-.container {
+.instruction-screen {
   display: flex;
   flex-direction: column;
-  height: 100%;
-}
-.img_container {
-  position: relative;
+  align-items: center;
   width: 100%;
-  height: fit-content;
+  height: 100%;
+  overflow: hidden;
+  background-color: #000;
+  color: #fff;
+  padding-top: 18px;
+  padding-bottom: 110px;
+}
+
+.media {
+  position: relative;
+  width: 780px;
+  max-width: calc(100% - 40px);
   margin-bottom: 140px;
 }
-.img {
+
+.media__image {
   margin: 0;
   padding: 0;
   width: 100%;
   height: auto;
   display: block;
+  border-radius: 8px;
 }
-.qr {
+
+.media__qr {
   position: absolute;
   left: 50%;
-  transform: translate(-50%);
+  width: 200px;
+  height: 200px;
+  transform: translateX(-50%);
   bottom: -100px;
+  border-radius: 10px;
 }
-.text_container {
+
+.copy {
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
+  width: 100%;
+  text-align: center;
 }
-.title {
+
+.copy__title {
   color: #ffffff;
   width: 100%;
   font-size: 42px;
+  line-height: 50px;
+  font-weight: 400;
   text-align: center;
   margin: 0;
 }
-.description {
-  color: white;
-  width: 600px;
+
+.copy__description {
+  color: rgba(255, 255, 255, 0.78);
+  width: 620px;
+  max-width: calc(100% - 64px);
   font-size: 24px;
+  line-height: 32px;
+  font-weight: 400;
   text-align: center;
   margin: 0;
 }

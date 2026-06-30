@@ -36,6 +36,18 @@ export class EffectsController {
             return { success: true, effect, brightness, color };
         }
 
+        if (brightness <= 0) {
+            const stopped = await this.effectsRunner.start(effect, brightness, color);
+
+            if (!stopped) {
+                throw new NotFoundException(`Effect '${effect}' not found`);
+            }
+
+            await this.effectService.deactivateAll();
+
+            return { success: true, effect, brightness, color };
+        }
+
         const started = await this.effectsRunner.start(effect, brightness, color);
 
         if (!started) {
@@ -49,9 +61,14 @@ export class EffectsController {
 
     @HttpCode(200)
     @Post('brightness')
-    setBrightness(@Body() body: SetBrightnessDto) {
+    async setBrightness(@Body() body: SetBrightnessDto) {
         const { brightness } = body;
-        this.effectsRunner.updateBrightness(brightness);
+        await this.effectsRunner.updateBrightness(brightness);
+
+        if (brightness <= 0) {
+            await this.effectService.deactivateAll();
+        }
+
         return { success: true, brightness };
     }
 

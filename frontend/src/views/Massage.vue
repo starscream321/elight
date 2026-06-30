@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import AppKaraoke from "../components/AppKaraoke.vue";
-import Img from '../assets/image/karaoke-photo.png'
+import Img from '../assets/image/massage-photo.png'
 import qr from '../assets/image/qr_karaoke.png'
 
 const text = 'Вы можете вызвать персонального ассистента для помощи с запуском.'

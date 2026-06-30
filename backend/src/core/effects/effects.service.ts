@@ -286,4 +286,13 @@ export class EffectsService {
       throw new NotFoundException(`Effect with id ${id} not found`);
     }
   }
+
+  async deactivateAll() {
+    await this.effectRepository
+      .createQueryBuilder()
+      .update()
+      .set({ active: false })
+      .where('active = :active', { active: true })
+      .execute();
+  }
 }

@@ -13,11 +13,14 @@ import Footer from './components/Footer.vue';
 
 <style scoped>
 .app-wrapper {
+  position: relative;
   width: 820px;
   height: 1180px;
   display: flex;
   flex-direction: column;
   font-family: "SF Pro Rounded", sans-serif;
+  background-color: #000;
+  overflow: hidden;
 }
 
 .main-content {

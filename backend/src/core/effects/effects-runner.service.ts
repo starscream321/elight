@@ -53,8 +53,12 @@ export class EffectsRunnerService {
       | undefined;
   }
 
-  public updateBrightness(brightness: number) {
+  public async updateBrightness(brightness: number) {
     this.currentBrightness = brightness;
+    if (this.isBrightnessOff(brightness)) {
+      this.stop();
+      await this.sendBlackoutFrame();
+    }
   }
 
   public updateHue(color: number) {
@@ -72,9 +76,15 @@ export class EffectsRunnerService {
     this.stop();
     this.effectsService.resetState();
 
-    this.currentEffect = effect;
     this.currentBrightness = brightness;
     this.currentHue = hueColor;
+
+    if (this.isBrightnessOff(brightness)) {
+      await this.sendBlackoutFrame();
+      return true;
+    }
+
+    this.currentEffect = effect;
     this.startTime = Date.now();
     this.isRunning = true;
     const activeRunId = ++this.runId;
@@ -94,6 +104,8 @@ export class EffectsRunnerService {
           this.currentBrightness,
           this.currentHue,
         );
+
+        if (!this.isRunning || activeRunId !== this.runId) return;
 
         const sends: Promise<void>[] = [];
 
@@ -143,6 +155,19 @@ export class EffectsRunnerService {
       this.ticker = undefined;
     }
     this.currentEffect = undefined;
+  }
+
+  private isBrightnessOff(brightness: number) {
+    return brightness <= 0;
+  }
+
+  private async sendBlackoutFrame() {
+    const sends = this.universeBuffers.map((buffer, universe) => {
+      buffer.fill(0);
+      return this.artnetService.sendPacket(buffer, universe, this.ipAddress);
+    });
+
+    await Promise.all(sends);
   }
 
   private getPositiveInt(name: string, fallback: number) {

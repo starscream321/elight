@@ -14,8 +14,10 @@ const effects = shallowRef<EffectFrontend[]>([])
 const brightness = ref(0)
 const color = ref(0)
 const isLoading = ref(false)
+const MUSIC_EFFECT = 'music'
+const isMusicEffect = (effect: string) => effect === MUSIC_EFFECT
 const activeEffect = computed(() => effects.value.find((effect) => effect.active))
-const isMusicActive = computed(() => activeEffect.value?.effect === 'music')
+const isMusicActive = computed(() => activeEffect.value?.effect === MUSIC_EFFECT)
 
 const getBrightnessFromLocalStorage = () => {
   const storageBrightness = localStorage.getItem('rgb_brightness')
@@ -37,6 +39,8 @@ const fetchEffects = async () => {
 
 
 const handleControl = async (id: number, effect: string, brightness: number, color?: number, active?: boolean) => {
+  if (isMusicEffect(effect)) return
+
   const previousEffects = effects.value;
   const nextActive = active === undefined ? true : !active;
 
@@ -100,12 +104,12 @@ watch(color, (newColor) => {
     >
       <MainBtn
           v-for="effect in effects"
-          @click="handleControl(effect.id, effect.effect, normalizeBrightness(brightness), effect.effect === 'music' ? undefined : color, effect.active)"
+          @click="handleControl(effect.id, effect.effect, normalizeBrightness(brightness), isMusicEffect(effect.effect) ? undefined : color, effect.active)"
           :key="effect.id"
           :name="effect.name"
           :icon="effect.icon"
-          :active="effect.active"
-          :disabled="isLoading"
+          :active="!isMusicEffect(effect.effect) && effect.active"
+          :disabled="isLoading || isMusicEffect(effect.effect)"
       />
     </div>
     <AppSlider
