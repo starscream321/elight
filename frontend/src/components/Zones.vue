@@ -1,7 +1,7 @@
 <script setup lang="ts">
 
 
-import {computed, onMounted, ref, shallowRef, watch} from "vue";
+import {computed, onMounted, ref, shallowRef} from "vue";
 import MainBtn from "./MainBtn.vue";
 import AppSlider from "./AppSlider.vue";
 import type {ZoneFromApi, ZoneFrontend} from "../types/zone.ts";
@@ -52,17 +52,17 @@ const handleControl = async (id: string, currentActive: boolean) => {
   }
 }
 
-onMounted(async () => {
-  await updateZones()
-  getBrightnessFromLocalStorage()
-})
-
-watch(brightness, (val: number) => {
+const handleBrightnessInput = (val: number) => {
   const activeIds = zones.value.filter(z => z.active).map(z => z.id);
   if (activeIds.length) {
     sendBrightness(val, activeIds);
   }
-});
+}
+
+onMounted(async () => {
+  await updateZones()
+  getBrightnessFromLocalStorage()
+})
 
 const topZones = computed(() => zones.value.filter(z => z.zone === 'top'))
 const centerZones = computed(() => zones.value.filter(z => z.zone === 'mid'))
@@ -130,6 +130,7 @@ const bottomZones = computed(() => zones.value.filter(z => z.zone === 'bot'))
   </div>
   <AppSlider
     v-model="brightness"
+    @brightness-input="handleBrightnessInput"
   />
 </div>
 </template>

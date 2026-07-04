@@ -4,6 +4,16 @@ import LightnessMinIcon from '../assets/icons/lightness-min.svg'
 
 
 const brightness = defineModel<number>({ default: 0 })
+
+const emit = defineEmits<{
+  brightnessInput: [value: number]
+}>()
+
+const handleInput = (event: Event) => {
+  const value = Number((event.target as HTMLInputElement).value)
+  brightness.value = value
+  emit('brightnessInput', value)
+}
 </script>
 
 <template>
@@ -17,7 +27,8 @@ const brightness = defineModel<number>({ default: 0 })
           type="range"
           min="0"
           max="100"
-          v-model="brightness"
+          :value="brightness"
+          @input="handleInput"
           class="slider-input"
       />
     </div>

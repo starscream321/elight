@@ -75,9 +75,9 @@ const debouncedSetColor = debounce(async (newColor: number) => {
   await setColor(newColor)
 }, 200)
 
-watch(brightness, (newBrightness) => {
+const handleBrightnessInput = (newBrightness: number) => {
   debouncedSetBrightness(newBrightness)
-})
+}
 
 watch(color, (newColor) => {
   debouncedSetColor(newColor)
@@ -114,6 +114,7 @@ watch(color, (newColor) => {
     </div>
     <AppSlider
       v-model="brightness"
+      @brightness-input="handleBrightnessInput"
     />
   </div>
 </template>

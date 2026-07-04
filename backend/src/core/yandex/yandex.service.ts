@@ -17,6 +17,21 @@ import {YandexLights, YandexScenarios} from './yandex.entity';
 import {actionBrightness, actionOnOff, actionTemperatureK, YandexAction} from "./types/yandex.actions";
 
 type TargetType = 'devices' | 'scenarios';
+type YandexCapabilityState = {
+    instance?: string;
+    value?: unknown;
+};
+type YandexCapability = {
+    type?: string;
+    state?: YandexCapabilityState | null;
+};
+type YandexDeviceInfo = {
+    id?: string;
+    capabilities?: YandexCapability[];
+};
+type YandexUserInfoResponse = {
+    devices?: YandexDeviceInfo[];
+};
 
 
 @Injectable()
@@ -35,6 +50,114 @@ export class YandexService {
     }
 
 
+    private getYandexAuthHeaders() {
+        const token = this.config.get<string>('YANDEX_TOKEN');
+        if (!token) {
+            this.logger.error('YANDEX_TOKEN is not configured');
+            throw new InternalServerErrorException('Missing Yandex API token');
+        }
+
+        return { Authorization: `Bearer ${token}` };
+    }
+
+    private handleYandexRequestError(err: unknown, context: string): never {
+        if (
+            err instanceof BadRequestException ||
+            err instanceof BadGatewayException ||
+            err instanceof ServiceUnavailableException ||
+            err instanceof InternalServerErrorException
+        ) {
+            throw err;
+        }
+
+        const e = err as AxiosError<Record<string, unknown>>;
+        this.logger.error(
+            `РћС€РёР±РєР° Р·Р°РїСЂРѕСЃР° Рє Yandex API [${context}]`,
+            e.stack || String(e),
+        );
+
+        if (e.response) {
+            const status = e.response.status;
+            const msg =
+                (e.response.data && (e.response.data.message || e.response.data.error)) ||
+                e.message;
+
+            if (status >= 400 && status < 500) {
+                throw new BadGatewayException(
+                    `Yandex API РѕС‚РєР»РѕРЅРёР» Р·Р°РїСЂРѕСЃ (${status}): ${msg}`,
+                );
+            }
+
+            if (status >= 500) {
+                throw new ServiceUnavailableException(
+                    `Yandex API РЅРµРґРѕСЃС‚СѓРїРµРЅ (${status}): ${msg}`,
+                );
+            }
+        }
+
+        throw new ServiceUnavailableException(`РќРµ СѓРґР°Р»РѕСЃСЊ СЃРІСЏР·Р°С‚СЊСЃСЏ СЃ Yandex API: ${e.message}`);
+    }
+
+    private extractOnOffState(capabilities?: YandexCapability[]): boolean | undefined {
+        const state = capabilities?.find((capability) =>
+            capability.type === 'devices.capabilities.on_off' &&
+            capability.state?.instance === 'on'
+        )?.state;
+
+        return typeof state?.value === 'boolean' ? state.value : undefined;
+    }
+
+    private async fetchYandexUserInfo(): Promise<YandexUserInfoResponse> {
+        try {
+            const response = await lastValueFrom(
+                this.http.get<YandexUserInfoResponse>(
+                    `${this.apiUrl}/user/info`,
+                    {
+                        headers: this.getYandexAuthHeaders(),
+                        timeout: 10_000,
+                    },
+                ),
+            );
+
+            this.assertYandexResponseSuccess(response.data);
+            return response.data;
+        } catch (err) {
+            this.handleYandexRequestError(err, 'user/info');
+        }
+    }
+
+    private async syncDevicesActualState(devices: YandexLights[]): Promise<YandexLights[]> {
+        if (!devices.length) return devices;
+
+        const userInfo = await this.fetchYandexUserInfo();
+        const actualStates = new Map<string, boolean>();
+
+        for (const device of userInfo.devices || []) {
+            if (!device.id) continue;
+
+            const active = this.extractOnOffState(device.capabilities);
+            if (typeof active === 'boolean') {
+                actualStates.set(device.id, active);
+            }
+        }
+
+        const syncedDevices = devices.map((device) => {
+            const active = actualStates.get(device.id);
+            return typeof active === 'boolean' ? { ...device, active } : device;
+        });
+
+        const changedDevices = syncedDevices.filter((device, index) =>
+            device.active !== devices[index].active
+        );
+
+        if (changedDevices.length) {
+            await this.yandexRepo.save(changedDevices);
+        }
+
+        return syncedDevices;
+    }
+
+
     private async sendApi(params:{
       targetType: TargetType,
       id?: string | string[],
@@ -43,11 +166,7 @@ export class YandexService {
     ): Promise<void> {
         const { targetType, id, actions, scenarios_id } = params
         let response: AxiosResponse;
-        const token = this.config.get<string>('YANDEX_TOKEN');
-        if (!token) {
-            this.logger.error('YANDEX_TOKEN не задан в окружении');
-            throw new InternalServerErrorException('Отсутствует токен для Yandex API');
-        }
+        const headers = this.getYandexAuthHeaders();
 
         try {
             if (targetType === 'devices') {
@@ -68,7 +187,7 @@ export class YandexService {
                             [targetType]: devices,
                         },
                         {
-                            headers: { Authorization: `Bearer ${token}` },
+                            headers,
                             timeout: 10_000,
                         },
                     ),
@@ -79,7 +198,7 @@ export class YandexService {
                         `${this.apiUrl}/${targetType}/${scenarios_id}/actions`,
                         {},
                         {
-                            headers: { Authorization: `Bearer ${token}` },
+                            headers,
                             timeout: 10_000,
                         },
                     )
@@ -216,7 +335,8 @@ export class YandexService {
     }
 
     async findAllDevices(): Promise<YandexLights[]> {
-        return await this.yandexRepo.find();
+        const devices = await this.yandexRepo.find();
+        return this.syncDevicesActualState(devices);
     }
 
     async findAllScenarios(): Promise<YandexScenarios[]> {
