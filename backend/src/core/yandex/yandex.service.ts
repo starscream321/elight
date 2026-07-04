@@ -119,7 +119,6 @@ export class YandexService {
                 ),
             );
 
-            this.assertYandexResponseSuccess(response.data);
             return response.data;
         } catch (err) {
             this.handleYandexRequestError(err, 'user/info');
@@ -336,7 +335,13 @@ export class YandexService {
 
     async findAllDevices(): Promise<YandexLights[]> {
         const devices = await this.yandexRepo.find();
-        return this.syncDevicesActualState(devices);
+        try {
+            return await this.syncDevicesActualState(devices);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.logger.warn(`Failed to sync actual Yandex light states; returning cached states: ${message}`);
+            return devices;
+        }
     }
 
     async findAllScenarios(): Promise<YandexScenarios[]> {
